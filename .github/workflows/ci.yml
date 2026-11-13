@@ -73,7 +73,7 @@ jobs:
       # Node 25 and later no longer ship Corepack, which provides the Yarn version package.json pins.
       - name: Enable Corepack
         run: |
-          npm install --global corepack@latest
+          npm install --global --force corepack@latest
           corepack enable
 
       - name: Install
