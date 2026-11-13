@@ -36,6 +36,12 @@ sealed class ProtocolException(ProtocolViolation violation) : Exception(Describe
     ProtocolViolation.NameOutOfOrder => "A name definition does not take the next number.",
     ProtocolViolation.NameUndefined => "A name reference is to a number not yet defined.",
     ProtocolViolation.NameTableFull => "A name definition is past the table's limit.",
+    ProtocolViolation.HandshakeExpected => "The first frame is not Hello.",
+    ProtocolViolation.InvalidHandshake => "A handshake frame is not valid JSON, or a field is missing or out of range.",
+    ProtocolViolation.UnexpectedFrame => "A frame came that the session does not allow at this point.",
+    ProtocolViolation.WindowExceeded => "The peer went past a window it was given.",
+    ProtocolViolation.DuplicateId => "An exchange started with an id that is still in use.",
+    ProtocolViolation.UnknownExchange => "A frame refers to an exchange that does not exist.",
     _ => "The peer broke the protocol.",
   };
 }

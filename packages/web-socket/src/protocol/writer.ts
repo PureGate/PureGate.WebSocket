@@ -9,7 +9,7 @@ const utf8 = new TextEncoder();
  * optional fields are set, and names, traces and codes follow the protocol's rules. Only the reader validates.
  */
 export class FrameWriter {
-  #bytes: Uint8Array;
+  #bytes: Uint8Array<ArrayBuffer>;
   #length = 0;
 
   constructor(capacity = 1024) {
@@ -22,7 +22,7 @@ export class FrameWriter {
   }
 
   /** The message written so far, as a view that the next write or clear may overwrite. */
-  view(): Uint8Array {
+  view(): Uint8Array<ArrayBuffer> {
     return this.#bytes.subarray(0, this.#length);
   }
 
@@ -90,7 +90,7 @@ export class FrameWriter {
   }
 
   // Makes room for length more bytes and returns the buffer to write them into.
-  #reserve(length: number): Uint8Array {
+  #reserve(length: number): Uint8Array<ArrayBuffer> {
     const needed = this.#length + length;
     if (needed > this.#bytes.length) {
       const grown = new Uint8Array(Math.max(needed, this.#bytes.length * 2));
@@ -100,6 +100,12 @@ export class FrameWriter {
 
     return this.#bytes;
   }
+}
+
+/** The bytes FrameWriter.write takes for frame, its length prefix included. */
+export function frameLength(frame: Frame): number {
+  const bodyLength = getBodyLength(frame, frame.flags & FrameFlags.HasError ? utf8Length(frame.errorMessage) : 0);
+  return varintLength(bodyLength) + bodyLength;
 }
 
 // Bytes after the length prefix: the kind, the fields and the payload.

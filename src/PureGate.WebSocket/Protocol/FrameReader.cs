@@ -23,6 +23,9 @@ ref struct FrameReader
     From = from;
   }
 
+  // The bytes not read yet.
+  public readonly ReadOnlySpan<byte> Remaining => Message[Offset..];
+
   public bool TryRead(out Frame frame)
   {
     if (Offset == Message.Length)

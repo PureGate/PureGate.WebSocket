@@ -141,7 +141,7 @@ A code above 11 is a protocol error. `message` is human-readable text and may be
 2. The client's first frame is Hello. Right after Hello, in the same message or later, it may send Requests, Events and StreamOpens without waiting for Welcome, within the initial windows below. A client that is resuming waits for Welcome instead.
 3. The server answers with Welcome before any other frame, then processes the frames that followed Hello.
 
-A Hello that fails closes the connection with the matching close code (see [Closing](#closing)), and frames sent after it are discarded.
+A Hello that fails closes the connection with the matching close code (see [Closing](#closing)), and frames sent after it are discarded. A first frame that is not Hello, a second Hello, and a Hello that is not valid JSON or has a required field missing or out of range are protocol errors.
 
 ### Hello (client → server), JSON
 
@@ -151,7 +151,7 @@ A Hello that fails closes the connection with the matching close code (see [Clos
 | `contract` | string, optional | The client's contract hash (see the server plan). |
 | `resume` | `{ session: string, received: number }`, optional | Resume this session. `received` is the number of sequenced frames the client has processed. |
 | `calls` | number | How many server → client Requests the client accepts at once. At least 1. |
-| `maxMessage` | number | The largest message the client accepts, in bytes. |
+| `maxMessage` | number | The largest message the client accepts, in bytes. At least 16,384. |
 
 ### Welcome (server → client), JSON
 
@@ -164,14 +164,16 @@ A Hello that fails closes the connection with the matching close code (see [Clos
 | `calls` | number | How many client → server Requests may be outstanding. At least 4. |
 | `streams` | number | How many streams may be open at once. At least 1. |
 | `events` | number | The client → server event window. At least 16. |
-| `maxMessage` | number | The largest message the server accepts, in bytes. |
+| `maxMessage` | number | The largest message the server accepts, in bytes. At least 16,384. |
 | `heartbeat` | number | Milliseconds (see [Liveness](#liveness)). |
 | `resumeWindow` | number | Milliseconds a dropped session stays resumable. 0 means resume is off. |
 | `contract` | `"current"` or `"stale"`, optional | Present when Hello carried a contract hash: whether it matches the server's. |
 | `expires` | number, optional | Milliseconds until the connection's authentication expires (see [Re-authentication](#re-authentication)). Absent when it doesn't expire. |
 | `route` | string, optional | This server instance's routing id, for resuming behind a load balancer (see [Acknowledgement and resume](#acknowledgement-and-resume)). Not a secret. |
 
-Before Welcome arrives, the client may use 4 calls, 1 stream and 16 events, the minimums every server advertises.
+Before Welcome arrives, the client may use 4 calls, 1 stream and 16 events, and messages of up to 16,384 bytes: the minimums every server advertises.
+
+A frame that is well formed but breaks the session's rules is a protocol error too: one past a window, a Request or StreamOpen whose id is still in use, and a Response, StreamItem, StreamEnd or Credit for an exchange that doesn't exist. A Cancel for an exchange that already ended is not an error, since it may cross the exchange's end on the wire, and is ignored.
 
 ## Re-authentication
 

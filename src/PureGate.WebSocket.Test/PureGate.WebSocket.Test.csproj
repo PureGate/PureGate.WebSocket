@@ -7,6 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <IsPackable>false</IsPackable>
+    <RunSettingsFilePath>$(MSBuildThisFileDirectory)coverage.runsettings</RunSettingsFilePath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,8 +29,14 @@
     <None Include="..\..\test-vectors\frames.json" Link="test-vectors\frames.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- The integration tests host the server in process, with the TestServer's operations. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\PureGate.WebSocket\PureGate.WebSocket.csproj" />
+    <ProjectReference Include="..\PureGate.WebSocket.TestServer\PureGate.WebSocket.TestServer.csproj" />
   </ItemGroup>
 
 </Project>

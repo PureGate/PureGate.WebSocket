@@ -91,11 +91,10 @@ Each `Map*` call returns an `OperationBuilder` with `RequireAuthorization(polici
 ### Handlers and calls
 
 ```csharp
-public delegate ValueTask<TResponse> RequestHandler<TRequest, TResponse>(
-    TRequest request, WebSocketCall call, CancellationToken cancellationToken);
+Func<TRequest, WebSocketCall, CancellationToken, ValueTask<TResponse>> handler
 ```
 
-The `cancellationToken` fires when the caller cancels, the call's deadline passes, or the session ends.
+Handlers are plain `Func`s, so the `MapRequest` overloads tell themselves apart by the handler's parameters, and a lambda's types are inferred. The `cancellationToken` fires when the caller cancels, the call's deadline passes, or the session ends.
 
 | Type | Members |
 |---|---|

@@ -5,4 +5,5 @@
   </Folder>
   <Project Path="src/PureGate.WebSocket/PureGate.WebSocket.csproj" />
   <Project Path="src/PureGate.WebSocket.Test/PureGate.WebSocket.Test.csproj" />
+  <Project Path="src/PureGate.WebSocket.TestServer/PureGate.WebSocket.TestServer.csproj" />
 </Solution>

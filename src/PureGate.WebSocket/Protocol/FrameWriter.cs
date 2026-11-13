@@ -9,6 +9,13 @@ namespace PureGate.WebSocket.Protocol;
 // validates.
 static class FrameWriter
 {
+  // The bytes Write takes for frame, its length prefix included.
+  public static int GetLength(scoped in Frame frame)
+  {
+    var bodyLength = GetBodyLength(in frame);
+    return Varint.GetLength((uint)bodyLength) + bodyLength;
+  }
+
   public static void Write(IBufferWriter<byte> output, scoped in Frame frame)
   {
     var bodyLength = GetBodyLength(in frame);

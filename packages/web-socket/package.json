@@ -32,12 +32,15 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit && tsc -p test",
-    "test": "vitest run --coverage",
+    "test": "vitest run --project unit --project integration --coverage",
+    "test:browsers": "vitest run --project browser",
     "prepack": "tsc"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
+    "@vitest/browser-playwright": "5.1.0",
     "@vitest/coverage-v8": "5.1.0",
+    "playwright": "1.65.0",
     "typescript": "7.0.2",
     "vite": "8.3.8",
     "vitest": "5.1.0"

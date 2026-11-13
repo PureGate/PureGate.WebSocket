@@ -25,4 +25,12 @@ enum ProtocolViolation
   NameOutOfOrder,
   NameUndefined,
   NameTableFull,
+
+  // Session rules: frames that are well formed but not allowed at this point.
+  HandshakeExpected,
+  InvalidHandshake,
+  UnexpectedFrame,
+  WindowExceeded,
+  DuplicateId,
+  UnknownExchange,
 }

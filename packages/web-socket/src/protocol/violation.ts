@@ -23,7 +23,14 @@ export type Violation =
   | "trailing_bytes"
   | "name_out_of_order"
   | "name_undefined"
-  | "name_table_full";
+  | "name_table_full"
+  // Session rules: frames that are well formed but not allowed at this point.
+  | "handshake_expected"
+  | "invalid_handshake"
+  | "unexpected_frame"
+  | "window_exceeded"
+  | "duplicate_id"
+  | "unknown_exchange";
 
 /** Thrown when a peer breaks the protocol. The connection then closes with 4000 (protocol_error). */
 export class ProtocolError extends Error {

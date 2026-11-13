@@ -10,7 +10,8 @@
     "typecheck": "yarn workspace @puregate/web-socket typecheck",
     "test": "yarn workspace @puregate/web-socket test",
     "format": "biome format --write",
-    "check": "biome check"
+    "check": "biome check",
+    "test:browsers": "yarn workspace @puregate/web-socket test:browsers"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7"
