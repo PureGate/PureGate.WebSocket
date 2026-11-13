@@ -42,7 +42,14 @@ public sealed partial class WebSocketConnection
       return;
     }
 
+    if (!TryAcquire())
+    {
+      RejectCall(frame.Id, ErrorCode.Overloaded, "Too many requests.");
+      return;
+    }
+
     operation.Start(this, in frame);
+    ReleaseUnusedLease();
   }
 
   void OnCancel(uint id)
@@ -63,7 +70,7 @@ public sealed partial class WebSocketConnection
 
   internal WebSocketCall BeginCall(Operation operation, scoped in Frame frame)
   {
-    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes, Closed);
+    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes, Closed) { Lease = TakeLease() };
     if (frame.Has(FrameFlags.HasTimeout))
       call.SetDeadline(frame.Timeout);
 
@@ -108,6 +115,8 @@ public sealed partial class WebSocketConnection
   {
     lock (CallsGate)
       ActiveCalls.Remove(call.Id);
+
+    call.ReleaseLease();
   }
 
   // Why the call ends without its handler's own outcome, if it does.

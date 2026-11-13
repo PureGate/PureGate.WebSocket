@@ -40,8 +40,22 @@ sealed class WelcomeMessage
   public string Route { get; set; }
 }
 
+// A refreshed token (docs/PROTOCOL.md, Re-authentication).
+sealed class AuthenticateMessage
+{
+  public string Token { get; set; }
+}
+
+sealed class AuthenticatedMessage
+{
+  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+  public long Expires { get; set; }
+}
+
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(HelloMessage))]
 [JsonSerializable(typeof(WelcomeMessage))]
+[JsonSerializable(typeof(AuthenticateMessage))]
+[JsonSerializable(typeof(AuthenticatedMessage))]
 [JsonSerializable(typeof(string))]
 partial class HandshakeJson : JsonSerializerContext;

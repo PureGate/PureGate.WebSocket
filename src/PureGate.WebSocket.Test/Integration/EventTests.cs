@@ -139,6 +139,39 @@ public sealed class EventTests
   }
 
   [Test]
+  public async Task BroadcastsOnlyOnTheEndpointsThatMapTheEvent()
+  {
+    await using var host = await TestHost.StartAsync(routes: static app => app.MapPureGateWebSocket("/other"));
+    var other = new Uri(host.Uri, "/other");
+    var mapping = new List<TestClient>();
+    var notMapping = new List<TestClient>();
+    try
+    {
+      // Interleaved, so the hub meets the endpoints in turn.
+      for (var i = 0; i < 6; i++)
+      {
+        mapping.Add(await host.ConnectAndHelloAsync());
+        var client = await TestClient.ConnectAsync(other);
+        await client.HelloAsync();
+        notMapping.Add(client);
+      }
+
+      var response = await mapping[0].CallAsync(1, "events.broadcast", """{"text":"all","number":1}""");
+      Assert.That(response.Has(FrameFlags.HasError), Is.False, response.ToString());
+
+      foreach (var client in mapping)
+        Assert.That((await client.ReceiveAsync(FrameKind.Event, 0)).Json().GetProperty("text").GetString(), Is.EqualTo("all"));
+      foreach (var client in notMapping)
+        Assert.That(await client.ReceivesWithinAsync(TimeSpan.FromMilliseconds(100)), Is.False);
+    }
+    finally
+    {
+      foreach (var client in mapping.Concat(notMapping))
+        await client.DisposeAsync();
+    }
+  }
+
+  [Test]
   public async Task SendsToGroupsAndUsersOnly()
   {
     await using var member = await Host.ConnectAndHelloAsync();

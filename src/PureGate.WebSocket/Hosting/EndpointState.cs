@@ -2,9 +2,11 @@ using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.WebSockets;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,7 +36,7 @@ sealed class EndpointState
       PureGateWebSocketOptions options,
       WebSocketHub hub,
       ILoggerFactory loggers,
-      IServiceScopeFactory scopes)
+      IServiceProvider services)
   {
     options.Validate();
     UseResolver(options.SerializerOptions);
@@ -44,7 +46,8 @@ sealed class EndpointState
     Options = options;
     Hub = hub;
     Logger = loggers.CreateLogger("PureGate.WebSocket");
-    Scopes = scopes;
+    Services = services;
+    Scopes = services.GetRequiredService<IServiceScopeFactory>();
     ResolveName = Resolve;
     LazyContract = new Lazy<WebSocketContract>(BuildContract);
     hub.AddEndpoint(this);
@@ -62,6 +65,22 @@ sealed class EndpointState
   public ILogger Logger { get; }
 
   public IServiceScopeFactory Scopes { get; }
+
+  // The app's root services.
+  public IServiceProvider Services { get; }
+
+  // Whether user passes policy, or the default policy for "". Operation policies need services.AddAuthorization().
+  public async ValueTask<bool> AuthorizeAsync(ClaimsPrincipal user, string policy)
+  {
+    var policies = Services.GetService<IAuthorizationPolicyProvider>()
+      ?? throw new InvalidOperationException("Operations that RequireAuthorization need services.AddAuthorization().");
+    var resolved = policy.Length == 0 ? await policies.GetDefaultPolicyAsync() : await policies.GetPolicyAsync(policy);
+    if (resolved is null)
+      throw new InvalidOperationException($"No authorization policy is named '{policy}'.");
+
+    var result = await Services.GetRequiredService<IAuthorizationService>().AuthorizeAsync(user ?? new ClaimsPrincipal(), resource: null, resolved);
+    return result.Succeeded;
+  }
 
   // The incoming name tables' resolver: one delegate for every connection.
   public NameResolver<Operation> ResolveName { get; }
@@ -249,7 +268,7 @@ sealed class EndpointState
     }
   }
 
-  void EnsureNotStarted()
+  public void EnsureNotStarted()
   {
     if (Started)
       throw new InvalidOperationException("The endpoint already accepts connections: map everything at startup.");

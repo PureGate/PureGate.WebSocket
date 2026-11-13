@@ -56,4 +56,16 @@ static partial class Log
 
   [LoggerMessage(17, LogLevel.Debug, "The session of connection {ConnectionId} expired without a resume.")]
   public static partial void SessionExpired(ILogger logger, string connectionId);
+
+  [LoggerMessage(18, LogLevel.Error, "Authenticate failed for connection {ConnectionId}.")]
+  public static partial void AuthenticationFailed(ILogger logger, string connectionId, Exception exception);
+
+  [LoggerMessage(19, LogLevel.Information, "A token was refused for connection {ConnectionId}.")]
+  public static partial void TokenRefused(ILogger logger, string connectionId);
+
+  [LoggerMessage(20, LogLevel.Information, "The authentication of connection {ConnectionId} expired without a refresh.")]
+  public static partial void AuthenticationExpired(ILogger logger, string connectionId);
+
+  [LoggerMessage(21, LogLevel.Debug, "Connection {ConnectionId} is over its rate limit.")]
+  public static partial void RateLimited(ILogger logger, string connectionId);
 }

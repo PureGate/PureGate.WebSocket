@@ -140,6 +140,7 @@ Defaults are sized for untrusted clients on the public internet.
 | `DrainTimeout` | 10 s | How long a stopping server lets exchanges in progress finish after GoAway. |
 | `AllowedOrigins` | none | When empty, only same-origin upgrades and requests without an `Origin` header are accepted. |
 | `Authenticate` | none | Validates the token from Hello, or from an Authenticate frame on a refresh. Returns the user and, optionally, when the authentication expires. |
+| `RateLimiter` | none | A factory for one `RateLimiter` per connection. Every call, stream and event takes a permit until its handler finishes; past the limit, calls and streams fail with `overloaded` and events are dropped. |
 | `UserId` | the `NameIdentifier` claim | Maps a user to an id, for `hub.User(id)`. |
 | `InvokeTimeout` | 30 s | Default deadline for server → browser calls. |
 | `IncludeExceptionDetails` | false | |

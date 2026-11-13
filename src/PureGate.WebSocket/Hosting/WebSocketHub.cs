@@ -99,9 +99,11 @@ sealed class WebSocketHub : IWebSocketHub
 
         if (connection.Endpoint != serializedFor)
         {
-          if (!connection.Endpoint.TryGetEvent(descriptor, out info))
+          // An endpoint that does not map the event leaves the payload serialized for the last one that does.
+          if (!connection.Endpoint.TryGetEvent(descriptor, out var found))
             continue;
 
+          info = found;
           buffer?.Return();
           buffer = new PooledBuffer(256);
           info.Codec.Write(buffer, payload);

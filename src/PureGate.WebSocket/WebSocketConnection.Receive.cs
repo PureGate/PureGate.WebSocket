@@ -35,11 +35,15 @@ public sealed partial class WebSocketConnection
     link.ReceiveBuffer = ArrayPool<byte>.Shared.Rent(FirstReceiveBytes);
     HelloMessage hello;
     byte[] pipelined;
+    Identity identity = default;
     try
     {
       (hello, pipelined) = await ReceiveHelloAsync(link);
       if (hello is not null)
+      {
         ContractStatus = CheckContract(hello.Contract);
+        identity = await AuthenticateAsync(link, hello.Token);
+      }
     }
     catch (ProtocolException exception)
     {
@@ -71,12 +75,12 @@ public sealed partial class WebSocketConnection
       && Options.ResumeWindow > TimeSpan.Zero
       && Endpoint.Sessions.TryGetValue(sessionId, out var session))
     {
-      switch (session.Resume(link, hello, ContractStatus))
+      switch (session.Resume(link, hello, ContractStatus, identity))
       {
         case ResumeOutcome.Resumed:
           // This session was only a stand-in until the right one was found.
           Outbox.End();
-          await session.RunLinkAsync(link, null, null);
+          await session.RunLinkAsync(link, null, null, default);
           return;
         case ResumeOutcome.Unavailable:
           _ = session.EndAsync();
@@ -84,15 +88,15 @@ public sealed partial class WebSocketConnection
       }
     }
 
-    await RunLinkAsync(link, hello, pipelined);
+    await RunLinkAsync(link, hello, pipelined, identity);
   }
 
   // Runs link until it ends. hello is set for a new session, which starts here; a resumed one has started already.
-  async Task RunLinkAsync(Link link, HelloMessage hello, byte[] pipelined)
+  async Task RunLinkAsync(Link link, HelloMessage hello, byte[] pipelined, Identity identity)
   {
     try
     {
-      if (hello is null || await StartAsync(link, hello, pipelined))
+      if (hello is null || await StartAsync(link, hello, pipelined, identity))
       {
         await ReceiveLoopAsync(link);
 
@@ -113,7 +117,7 @@ public sealed partial class WebSocketConnection
     }
     catch (CloseException exception)
     {
-      link.EndsSession = true;
+      link.EndsSession |= exception.EndsSession;
       await CloseAndDrainAsync(link, exception.Status, exception.Message);
     }
     catch (Exception exception) when (IsTransportFailure(exception))
@@ -155,14 +159,16 @@ public sealed partial class WebSocketConnection
 
   // A new session: Welcome first, then the OnConnected handlers, then the frames that came with Hello. Those wait for
   // the handlers, which may set up groups they rely on. False when a handler failed.
-  async Task<bool> StartAsync(Link link, HelloMessage hello, byte[] pipelined)
+  async Task<bool> StartAsync(Link link, HelloMessage hello, byte[] pipelined, Identity identity)
   {
-    UserId = Options.UserId(User);
+    UserId = Options.UserId(identity.User);
     Outbox.MaxMessage = hello.MaxMessage;
     ClientCallSlots = new SemaphoreSlim(hello.Calls, hello.Calls);
+    StartLimiter();
 
     lock (LinkGate)
     {
+      SetIdentity(identity);
       CurrentLink = link;
       Started = true;
       AttachWelcome(link, resumed: false, received: 0);
@@ -284,6 +290,7 @@ public sealed partial class WebSocketConnection
       Heartbeat = (long)Options.Heartbeat.TotalMilliseconds,
       ResumeWindow = (long)Options.ResumeWindow.TotalMilliseconds,
       Contract = ContractStatus,
+      Expires = ExpiresInMilliseconds(),
       Route = Options.ResumeRoute,
     };
 
@@ -340,6 +347,9 @@ public sealed partial class WebSocketConnection
         case FrameKind.Ack:
           if (!Outbox.Acknowledge(frame.Count))
             ProtocolException.Throw(ProtocolViolation.UnexpectedFrame);
+          break;
+        case FrameKind.Authenticate:
+          OnAuthenticate(in frame);
           break;
         case FrameKind.Ping:
           var pong = new Frame { Kind = FrameKind.Pong };
@@ -409,8 +419,11 @@ public sealed partial class WebSocketConnection
   }
 }
 
-// Ends the connection with a close code other than protocol_error. The session ends with it.
-sealed class CloseException(WebSocketCloseStatus status, string message) : Exception(message)
+// Ends the connection with a close code other than protocol_error.
+sealed class CloseException(WebSocketCloseStatus status, string message, bool endsSession = true) : Exception(message)
 {
   public WebSocketCloseStatus Status { get; } = status;
+
+  // False for 4001 (unauthorized): a browser that comes back authenticated resumes the session.
+  public bool EndsSession { get; } = endsSession;
 }

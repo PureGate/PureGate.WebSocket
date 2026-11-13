@@ -60,6 +60,17 @@ public sealed class WebSocketCall : IAsyncDisposable
 
   internal bool CancelledByClient { get; private set; }
 
+  // The rate limiter's permit, held until the handler finishes.
+  internal System.Threading.RateLimiting.RateLimitLease Lease { get; set; }
+
+  // Lets the permit go before the exchange's last frame is written, as the window does, so the browser's next
+  // call never meets a limit the server still counts as taken.
+  internal void ReleaseLease()
+  {
+    Lease?.Dispose();
+    Lease = null;
+  }
+
   // Environment.TickCount64 when the deadline passes; 0 without one.
   internal long Deadline { get; private set; }
 
@@ -96,6 +107,7 @@ public sealed class WebSocketCall : IAsyncDisposable
       await Scope.DisposeAsync();
     }
 
+    ReleaseLease();
     Cancellation.Dispose();
   }
 }

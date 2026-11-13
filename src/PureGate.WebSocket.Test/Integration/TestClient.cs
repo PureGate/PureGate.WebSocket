@@ -153,6 +153,8 @@ sealed class TestClient : IAsyncDisposable
 
   public WebSocketState State => Socket.State;
 
+  public WebSocketCloseStatus? CloseStatus => Socket.CloseStatus;
+
   public static async Task<TestClient> ConnectAsync(Uri uri, string subprotocol = Subprotocol, string origin = null)
   {
     var socket = new ClientWebSocket();
@@ -214,6 +216,23 @@ sealed class TestClient : IAsyncDisposable
       var (type, length) = await ReceiveMessageAsync(timeout == default ? DefaultTimeout : timeout);
       if (type == WebSocketMessageType.Close)
         Assert.Fail($"The server closed with {Socket.CloseStatus}: {Socket.CloseStatusDescription}");
+
+      var reader = new FrameReader(ReceiveBuffer.AsSpan(0, length), Side.Server);
+      while (reader.TryRead(out var frame))
+        Buffered.Enqueue(Received.From(in frame));
+    }
+
+    return Buffered.Dequeue();
+  }
+
+  // The next frame, or null once the server closed, for tests where a close is one of the expected outcomes.
+  public async Task<Received> ReceiveOrNullAsync(TimeSpan timeout = default)
+  {
+    while (Buffered.Count == 0)
+    {
+      var (type, length) = await ReceiveMessageAsync(timeout == default ? DefaultTimeout : timeout);
+      if (type == WebSocketMessageType.Close)
+        return null;
 
       var reader = new FrameReader(ReceiveBuffer.AsSpan(0, length), Side.Server);
       while (reader.TryRead(out var frame))

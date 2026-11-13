@@ -1,5 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Http;
 
 namespace PureGate.WebSocket;
 
@@ -65,6 +67,16 @@ public sealed class PureGateWebSocketOptions
   // using a visitor's cookies to connect.
   public IList<string> AllowedOrigins { get; set; } = [];
 
+  // Validates the token a browser sends in Hello, and again when it refreshes it, for apps that cannot use cookies. Set,
+  // the endpoint authenticates by token only: a Hello without one closes with 4001, and the connection's user is the
+  // result's. Unset, the connection's user is the upgrade request's, from the usual ASP.NET Core schemes. Tokens never
+  // travel in the URL, where proxies and logs would keep them.
+  public Func<string, HttpContext, CancellationToken, ValueTask<WebSocketAuthenticationResult>> Authenticate { get; set; }
+
+  // A rate limiter for each connection, created when it starts. Every call, stream and event takes a permit, held
+  // until its handler finishes. Past the limit, calls and streams fail with overloaded, and events are dropped.
+  public Func<WebSocketConnection, RateLimiter> RateLimiter { get; set; }
+
   // The id hub.User(id) finds a user's connections by. By default, the NameIdentifier claim.
   public Func<ClaimsPrincipal, string> UserId { get; set; } = static user => user?.FindFirstValue(ClaimTypes.NameIdentifier);
 
@@ -107,6 +119,8 @@ public sealed class PureGateWebSocketOptions
     ResumeRoute = ResumeRoute,
     DrainTimeout = DrainTimeout,
     AllowedOrigins = [.. AllowedOrigins],
+    Authenticate = Authenticate,
+    RateLimiter = RateLimiter,
     UserId = UserId,
     InvokeTimeout = InvokeTimeout,
     IncludeExceptionDetails = IncludeExceptionDetails,

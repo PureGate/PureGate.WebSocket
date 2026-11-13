@@ -36,10 +36,11 @@ public sealed partial class WebSocketConnection
     Unavailable,
   }
 
-  // The browser's Hello asked to resume this session on link. Answers with Welcome and the frames the browser missed.
-  ResumeOutcome Resume(Link link, HelloMessage hello, string contractStatus)
+  // The browser's Hello asked to resume this session on link, authenticated as identity, which must be the session's
+  // user: a leaked session id alone takes nothing over. Answers with Welcome and the frames the browser missed.
+  ResumeOutcome Resume(Link link, HelloMessage hello, string contractStatus, Identity identity)
   {
-    var userId = Options.UserId(link.Context.User);
+    var userId = Options.UserId(identity.User);
     Link old;
     lock (LinkGate)
     {
@@ -52,7 +53,7 @@ public sealed partial class WebSocketConnection
       CurrentLink = link;
       ExpiryTimer?.Change(Timeout.Infinite, Timeout.Infinite);
       HttpContext = link.Context;
-      User = link.Context.User;
+      SetIdentity(identity);
       ContractStatus = contractStatus;
       Outbox.MaxMessage = hello.MaxMessage;
       if (!AttachWelcome(link, resumed: true, received: hello.Resume.Received))
@@ -259,6 +260,8 @@ public sealed partial class WebSocketConnection
     AckTimer?.Dispose();
     ExpiryTimer?.Dispose();
     DrainTimer?.Dispose();
+    ExpiryOfAuthentication?.Dispose();
+    Limiter?.Dispose();
     Endpoint.Sessions.TryRemove(new KeyValuePair<string, WebSocketConnection>(SessionId, this));
 
     await SessionCancellation.CancelAsync();

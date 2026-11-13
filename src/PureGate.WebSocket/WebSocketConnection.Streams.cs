@@ -31,7 +31,14 @@ public sealed partial class WebSocketConnection
       return;
     }
 
+    if (!TryAcquire())
+    {
+      RejectStream(in frame, ErrorCode.Overloaded, "Too many requests.");
+      return;
+    }
+
     operation.Start(this, in frame);
+    ReleaseUnusedLease();
   }
 
   // Refuses a stream at StreamOpen: a download with a failed StreamEnd, an upload with a failed Response, after which
@@ -56,7 +63,7 @@ public sealed partial class WebSocketConnection
 
   internal DownloadState BeginDownload(Operation operation, scoped in Frame frame)
   {
-    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes, Closed);
+    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes, Closed) { Lease = TakeLease() };
     var stream = new DownloadState(call, frame.Credit);
     lock (CallsGate)
       Downloads.Add(frame.Id, stream);
@@ -97,6 +104,8 @@ public sealed partial class WebSocketConnection
     lock (CallsGate)
       Downloads.Remove(stream.Id);
 
+    stream.Call.ReleaseLease();
+
     var outcome = GetOutcome(stream.Call);
     if (outcome != CallOutcome.Completed)
     {
@@ -134,7 +143,7 @@ public sealed partial class WebSocketConnection
 
   internal UploadState<TItem> BeginUpload<TItem>(Operation operation, scoped in Frame frame, PayloadCodec<TItem> codec)
   {
-    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes, Closed);
+    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes, Closed) { Lease = TakeLease() };
     var upload = new UploadState<TItem>(frame.Id, call, codec, this);
     lock (CallsGate)
       Uploads.Add(frame.Id, upload);
@@ -264,6 +273,8 @@ public sealed partial class WebSocketConnection
       if (upload.ClientEnded)
         Uploads.Remove(upload.Id);
     }
+
+    upload.Call.ReleaseLease();
   }
 
   // Ends what the session still has open: their handlers see the session's token cancelled.

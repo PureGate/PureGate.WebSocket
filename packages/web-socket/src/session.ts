@@ -85,6 +85,7 @@ interface Welcome {
   maxMessage: number;
   heartbeat: number;
   resumeWindow?: number;
+  expires?: number;
   contract?: string;
   route?: string;
 }
@@ -171,6 +172,7 @@ export class Session {
   #heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
   #lastReceived = 0;
   #pingSent = false;
+  #refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(owner: SessionOwner) {
     this.#owner = owner;
@@ -323,6 +325,9 @@ export class Session {
       case FrameKind.Ping:
         this.#write(this.#frame(FrameKind.Pong));
         break;
+      case FrameKind.Authenticated:
+        this.#onAuthenticated(frame);
+        break;
       case FrameKind.Pong:
         break;
       case FrameKind.GoAway:
@@ -385,6 +390,7 @@ export class Session {
     }
 
     this.#startHeartbeat(welcome.heartbeat > 0 ? welcome.heartbeat : 15_000);
+    this.#scheduleRefresh(welcome.expires);
     this.#owner.welcomed(this, resumed, welcome.contract);
   }
 
@@ -805,6 +811,47 @@ export class Session {
     this.#writer.clear();
   }
 
+  // Refreshing authentication (docs/PROTOCOL.md, Re-authentication): with a token provider, a fresh token goes out
+  // a minute before the authentication expires, or halfway there when less than two minutes are left. Without one,
+  // the server closes with 4001 at expiry, and the reconnect brings the browser's current cookies.
+
+  #scheduleRefresh(expires: number | undefined): void {
+    clearTimeout(this.#refreshTimer);
+    this.#refreshTimer = undefined;
+    if (!(typeof expires === "number" && expires > 0) || this.#owner.options.token === undefined) return;
+
+    const wait = expires > 120_000 ? expires - 60_000 : expires / 2;
+    this.#refreshTimer = setTimeout(() => void this.#refresh(), wait);
+  }
+
+  async #refresh(): Promise<void> {
+    const socket = this.#socket;
+    let token: string;
+    try {
+      token = await (this.#owner.options.token as () => string | Promise<string>)();
+    } catch (error) {
+      this.#owner.reportError(error);
+      return;
+    }
+
+    // A connection that went away meanwhile authenticates again in its next Hello.
+    if (socket === undefined || socket !== this.#socket || !this.#welcomed) return;
+    const frame = this.#frame(FrameKind.Authenticate);
+    frame.payload = encoder.encode(JSON.stringify({ token }));
+    this.#write(frame);
+  }
+
+  #onAuthenticated(frame: Frame): void {
+    let expires: number | undefined;
+    try {
+      expires = (JSON.parse(decoder.decode(frame.payload)) as { expires?: number }).expires;
+    } catch {
+      throw new ProtocolError("invalid_handshake");
+    }
+
+    this.#scheduleRefresh(expires);
+  }
+
   // Liveness: a Ping after a heartbeat of silence, and a reconnect after two.
 
   #startHeartbeat(interval: number): void {
@@ -852,6 +899,7 @@ export class Session {
     this.#helloSent = false;
     this.#welcomed = false;
     clearTimeout(this.#heartbeatTimer);
+    clearTimeout(this.#refreshTimer);
     clearTimeout(this.#ackTimer);
     this.#ackTimer = undefined;
 
@@ -869,6 +917,7 @@ export class Session {
     this.#failExchanges(error);
     this.#dropReplay();
     clearTimeout(this.#heartbeatTimer);
+    clearTimeout(this.#refreshTimer);
     clearTimeout(this.#ackTimer);
     this.close(1000, "");
   }

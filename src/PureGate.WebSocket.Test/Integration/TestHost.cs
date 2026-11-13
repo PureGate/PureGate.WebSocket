@@ -30,11 +30,14 @@ sealed class TestHost : IAsyncDisposable
 
   public static async Task<TestHost> StartAsync(
       Action<PureGateWebSocketOptions> configure = null,
-      Action<WebSocketEndpointBuilder> map = null)
+      Action<WebSocketEndpointBuilder> map = null,
+      Action<IServiceCollection> services = null,
+      Action<WebApplication> routes = null)
   {
     var builder = WebApplication.CreateSlimBuilder();
     builder.WebHost.UseUrls("http://127.0.0.1:0");
     builder.Logging.ClearProviders();
+    services?.Invoke(builder.Services);
     builder.Services.AddPureGateWebSocket(options =>
     {
       TestApi.Configure(options);
@@ -46,6 +49,7 @@ sealed class TestHost : IAsyncDisposable
     var ws = app.MapPureGateWebSocket("/ws");
     TestApi.Map(ws);
     map?.Invoke(ws);
+    routes?.Invoke(app);
     await app.StartAsync();
 
     var address = app.Urls.First();

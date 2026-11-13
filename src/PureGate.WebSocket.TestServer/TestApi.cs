@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -360,6 +361,33 @@ public static class TestApi
     });
     store.MapRequest<string>("counted", static (call, cancellationToken) => ValueTask.FromResult(State(call).Counted ?? ""));
     store.MapRequest<int>("cancelled", static (call, cancellationToken) => ValueTask.FromResult(Volatile.Read(ref State(call).UploadsCancelled)));
+  }
+
+  // Tokens of the /ws-token endpoint: "user" or "user:role", with "+milliseconds" for one that expires. "bad" fails.
+  public static ValueTask<WebSocketAuthenticationResult> AuthenticateToken(string token, HttpContext context, CancellationToken cancellationToken)
+  {
+    if (token == "bad")
+      return ValueTask.FromResult(WebSocketAuthenticationResult.Fail());
+
+    var plus = token.IndexOf('+');
+    var name = plus < 0 ? token : token[..plus];
+    DateTimeOffset? expires = plus < 0 ? null : DateTimeOffset.UtcNow.AddMilliseconds(int.Parse(token[(plus + 1)..]));
+    var parts = name.Split(':');
+    var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, parts[0]) };
+    if (parts.Length > 1)
+      claims.Add(new Claim(ClaimTypes.Role, parts[1]));
+
+    var user = new ClaimsPrincipal(new ClaimsIdentity(claims, "token"));
+    return ValueTask.FromResult(WebSocketAuthenticationResult.Success(user, expires));
+  }
+
+  // The token endpoint's operations: who the connection is, and operations behind policies.
+  public static void MapSecure(WebSocketEndpointBuilder ws)
+  {
+    ws.MapRequest<string>("auth.whoami", static (call, cancellationToken) => ValueTask.FromResult(call.Connection.UserId ?? ""));
+    var secure = ws.MapGroup("secure");
+    secure.MapRequest<string>("member", static (call, cancellationToken) => ValueTask.FromResult("member")).RequireAuthorization();
+    secure.MapRequest<string>("admin", static (call, cancellationToken) => ValueTask.FromResult("admin")).RequireAuthorization("admin");
   }
 
   static ConnectionState State(WebSocketCall call) =>

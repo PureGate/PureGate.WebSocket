@@ -177,7 +177,7 @@ public abstract class WebSocketBuilder
   OperationBuilder Add(Operation operation)
   {
     Endpoint.Add(operation);
-    return new OperationBuilder(operation);
+    return new OperationBuilder(Endpoint, operation);
   }
 
   string FullName(string name)
@@ -257,13 +257,41 @@ public sealed class WebSocketEndpointBuilder : WebSocketBuilder, IEndpointConven
   public void Finally(Action<EndpointBuilder> finallyConvention) => Inner.Finally(finallyConvention);
 }
 
-// One mapped operation or event. Authorization and filters will be set here.
+// One mapped operation, stream or event: its authorization and filters.
 public sealed class OperationBuilder
 {
-  internal OperationBuilder(Operation operation) => Operation = operation;
+  readonly EndpointState Endpoint;
+
+  internal OperationBuilder(EndpointState endpoint, Operation operation)
+  {
+    Endpoint = endpoint;
+    Operation = operation;
+  }
 
   internal Operation Operation { get; }
 
   // The full name browsers use, such as "orders.get".
   public string Name => Operation.Name;
+
+  // Every call must pass these policies, evaluated with IAuthorizationService for the connection's user, or the
+  // default policy when none is named. The outcome is cached per connection until its user changes. A refused call
+  // fails with unauthorized, or forbidden for an authenticated user, before its handler runs; a refused event is
+  // dropped. Needs services.AddAuthorization().
+  public OperationBuilder RequireAuthorization(params string[] policies)
+  {
+    ArgumentNullException.ThrowIfNull(policies);
+    Endpoint.EnsureNotStarted();
+    var added = policies.Length == 0 ? [""] : policies;
+    Operation.Policies = Operation.Policies is null ? added : [.. Operation.Policies, .. added];
+    return this;
+  }
+
+  // Runs filter around every call's handler, after authorization and the filters added before it.
+  public OperationBuilder AddFilter(WebSocketFilter filter)
+  {
+    ArgumentNullException.ThrowIfNull(filter);
+    Endpoint.EnsureNotStarted();
+    (Operation.Filters ??= []).Add(filter);
+    return this;
+  }
 }

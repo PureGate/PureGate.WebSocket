@@ -46,7 +46,7 @@ public static class PureGateWebSocketExtensions
       options,
       hub,
       services.GetRequiredService<ILoggerFactory>(),
-      services.GetRequiredService<IServiceScopeFactory>());
+      services);
 
     // A stopping host sends GoAway on every connection, so browsers move to another instance before this one goes.
     services.GetService<IHostApplicationLifetime>()?.ApplicationStopping.Register(endpoint.GoAway);

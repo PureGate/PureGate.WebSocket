@@ -1,3 +1,4 @@
+using System.Threading.RateLimiting;
 using PureGate.WebSocket.Protocol;
 using PureGate.WebSocket.Serialization;
 
@@ -28,7 +29,34 @@ abstract class Operation(string name, OperationKind kind)
 
   public virtual Type ResponseType => typeof(NoPayload);
 
+  // The authorization policies every call must pass, "" for the default one; null for none.
+  public string[] Policies { get; set; }
+
+  // From OperationBuilder.AddFilter, outermost first; null for none.
+  public List<WebSocketFilter> Filters { get; set; }
+
+  // Whether calls go through authorization or filters before the handler. Without either, they go straight to it.
+  public bool HasPipeline => Policies is not null || Filters is not null;
+
   public abstract void Start(WebSocketConnection connection, scoped in Frame frame);
+
+  // Authorization, then the filters in the order they were added, then the handler. A refused call fails with
+  // unauthorized or forbidden, and its handler never runs.
+  public async ValueTask RunPipelineAsync(WebSocketConnection connection, WebSocketCall call, Func<ValueTask> handler)
+  {
+    if (Policies is not null && await connection.AuthorizeAsync(Policies) is { } refused)
+      throw refused;
+
+    if (Filters is null)
+    {
+      await handler();
+      return;
+    }
+
+    await Next(0);
+
+    ValueTask Next(int index) => index == Filters.Count ? handler() : Filters[index](call, () => Next(index + 1));
+  }
 
   sealed class UnknownOperation() : Operation("", OperationKind.Unknown)
   {
@@ -80,10 +108,13 @@ sealed class RequestOperation<TRequest, TResponse>(
 
     async Task RunAsync()
     {
-      TResponse result;
+      TResponse result = default;
       try
       {
-        result = await operation.Invoke(value, call);
+        if (operation.HasPipeline)
+          await operation.RunPipelineAsync(connection, call, async () => result = await operation.Invoke(value, call));
+        else
+          result = await operation.Invoke(value, call);
       }
       catch (Exception exception)
       {
@@ -123,17 +154,24 @@ sealed class ClientEventOperation<T>(
       return;
     }
 
-    connection.QueueEvent(new Work(this, value, connection.ReadTrace(in frame)));
+    connection.QueueEvent(new Work(this, value, connection.ReadTrace(in frame), connection.TakeLease()));
   }
 
-  sealed class Work(ClientEventOperation<T> operation, T value, string traceParent) : EventWork
+  sealed class Work(ClientEventOperation<T> operation, T value, string traceParent, RateLimitLease lease) : EventWork
   {
     public override async Task RunAsync(WebSocketConnection connection)
     {
-      var call = connection.BeginEvent(operation.Name, traceParent);
+      var call = connection.BeginEvent(operation.Name, traceParent, lease);
       try
       {
-        await operation.Handler(value, call, call.CancellationToken);
+        if (operation.HasPipeline)
+          await operation.RunPipelineAsync(connection, call, () => operation.Handler(value, call, call.CancellationToken));
+        else
+          await operation.Handler(value, call, call.CancellationToken);
+      }
+      catch (CallException exception) when (exception.Code is "unauthorized" or "forbidden")
+      {
+        connection.EventRefused(operation.Name);
       }
       catch (Exception exception) when (!call.CancellationToken.IsCancellationRequested || exception is not OperationCanceledException)
       {
@@ -196,19 +234,12 @@ sealed class StreamOperation<TRequest, TItem>(
     async Task RunAsync()
     {
       Exception failure = null;
-      var token = stream.Call.CancellationToken;
       try
       {
-        await using var items = operation.Handler(value, stream.Call, token).GetAsyncEnumerator(token);
-        while (true)
-        {
-          await stream.WaitForCreditAsync(token);
-          if (!await items.MoveNextAsync())
-            break;
-
-          if (!connection.WriteStreamItem(stream, operation.Item, items.Current))
-            break;
-        }
+        if (operation.HasPipeline)
+          await operation.RunPipelineAsync(connection, stream.Call, ProduceAsync);
+        else
+          await ProduceAsync();
       }
       catch (Exception exception)
       {
@@ -216,6 +247,21 @@ sealed class StreamOperation<TRequest, TItem>(
       }
 
       await connection.EndDownloadAsync(stream, failure);
+    }
+
+    async ValueTask ProduceAsync()
+    {
+      var token = stream.Call.CancellationToken;
+      await using var items = operation.Handler(value, stream.Call, token).GetAsyncEnumerator(token);
+      while (true)
+      {
+        await stream.WaitForCreditAsync(token);
+        if (!await items.MoveNextAsync())
+          break;
+
+        if (!connection.WriteStreamItem(stream, operation.Item, items.Current))
+          break;
+      }
     }
   }
 }
@@ -266,12 +312,13 @@ sealed class UploadOperation<TRequest, TItem, TResponse>(
 
     async Task RunAsync()
     {
-      var token = upload.Call.CancellationToken;
-      connection.GrantUploadCredit(upload, (uint)connection.Options.UploadWindow);
-      TResponse result;
+      TResponse result = default;
       try
       {
-        result = await operation.Handler(value, upload.ReadAsync(token), upload.Call, token);
+        if (operation.HasPipeline)
+          await operation.RunPipelineAsync(connection, upload.Call, async () => result = await HandleAsync());
+        else
+          result = await HandleAsync();
       }
       catch (Exception exception)
       {
@@ -280,6 +327,14 @@ sealed class UploadOperation<TRequest, TItem, TResponse>(
       }
 
       await connection.CompleteUploadAsync(upload, operation.Response, result);
+    }
+
+    // Credit starts when the handler does: an upload its authorization refuses never takes an item.
+    ValueTask<TResponse> HandleAsync()
+    {
+      var token = upload.Call.CancellationToken;
+      connection.GrantUploadCredit(upload, (uint)connection.Options.UploadWindow);
+      return operation.Handler(value, upload.ReadAsync(token), upload.Call, token);
     }
   }
 }

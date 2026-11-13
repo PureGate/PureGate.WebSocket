@@ -81,7 +81,14 @@ public sealed partial class WebSocketConnection
       return;
     }
 
+    if (!TryAcquire())
+    {
+      DropEvent(operation.Name, "The connection is over its rate limit.");
+      return;
+    }
+
     operation.Start(this, in frame);
+    ReleaseUnusedLease();
   }
 
   internal void QueueEvent(EventWork work)
@@ -99,8 +106,8 @@ public sealed partial class WebSocketConnection
       preferLocal: false);
   }
 
-  internal WebSocketCall BeginEvent(string name, string traceParent) =>
-    new(this, name, 0, traceParent, Endpoint.Scopes, Closed);
+  internal WebSocketCall BeginEvent(string name, string traceParent, System.Threading.RateLimiting.RateLimitLease lease) =>
+    new(this, name, 0, traceParent, Endpoint.Scopes, Closed) { Lease = lease };
 
   internal void DropEvent(string name, string reason)
   {
