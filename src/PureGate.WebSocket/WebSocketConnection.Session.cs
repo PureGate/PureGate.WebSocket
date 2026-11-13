@@ -75,18 +75,19 @@ public sealed partial class WebSocketConnection
     return ResumeOutcome.Resumed;
   }
 
-  // A replaced connection's browser side is usually gone: give its close frame a moment, then let go of it.
-  static async Task AbortWhenClosedAsync(Link link)
+  // A replaced connection's browser side is usually gone: give it a moment to answer the close frame, then let go of
+  // it. Not as soon as the close frame is written: the abort would reset a connection whose browser is still there
+  // before it reads the close code.
+  async Task AbortWhenClosedAsync(Link link)
   {
     try
     {
-      await link.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+      await Outbox.WhenDetached(link).WaitAsync(TimeSpan.FromSeconds(5));
     }
     catch (TimeoutException)
     {
+      link.Socket.Abort();
     }
-
-    link.Socket.Abort();
   }
 
   // A message's sequenced frames are processed. Called under LinkGate.

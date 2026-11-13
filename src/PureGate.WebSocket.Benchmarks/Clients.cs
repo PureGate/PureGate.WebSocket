@@ -23,7 +23,7 @@ interface IBenchClient : IAsyncDisposable
 
 // A minimal PureGate.WebSocket client on the library's own frame codec: Hello, Requests, Acks, and the events it gets.
 // It sends the way the browser client does: every call carries the browser's default deadline, and frames written
-// while a message is going out are coalesced into the next one.
+// while a message is going out are coalesced into the next ones, each within the server's message limit.
 sealed class PureGateClient : IBenchClient
 {
   const int AckEvery = 64;
@@ -45,6 +45,13 @@ sealed class PureGateClient : IBenchClient
   readonly byte[] ReceiveBuffer = new byte[64 * 1024];
   ArrayBufferWriter<byte> Pending = new(4096);
   ArrayBufferWriter<byte> Outgoing = new(4096);
+
+  // Where each message in Pending ends, but the last.
+  List<int> PendingEnds = [];
+  List<int> OutgoingEnds = [];
+
+  // The largest message the server accepts: the protocol's minimum until Welcome says.
+  int MaxMessage = 16 * 1024;
   bool Sending;
   Task Receiving;
   int LastId;
@@ -84,7 +91,8 @@ sealed class PureGateClient : IBenchClient
     return answer.Task;
   }
 
-  // Copies the frame into the next message; the writer that finds no send running starts one.
+  // Copies the frame into the next message, or a new one when it would not fit; the writer that finds no send running
+  // starts one.
   void Write(scoped in Frame frame, string name = null)
   {
     bool start;
@@ -96,6 +104,10 @@ sealed class PureGateClient : IBenchClient
         copy.NameCode = Names.Next(name);
         copy.NameText = FrameLayout.NameHasText(copy.NameCode) ? Encoding.ASCII.GetBytes(name) : default;
       }
+
+      var message = PendingEnds.Count > 0 ? PendingEnds[^1] : 0;
+      if (Pending.WrittenCount > message && Pending.WrittenCount - message + FrameWriter.GetLength(in copy) > MaxMessage)
+        PendingEnds.Add(Pending.WrittenCount);
 
       FrameWriter.Write(Pending, in copy);
       start = !Sending;
@@ -113,6 +125,7 @@ sealed class PureGateClient : IBenchClient
       while (true)
       {
         ArrayBufferWriter<byte> next;
+        List<int> ends;
         lock (Gate)
         {
           if (Pending.WrittenCount == 0)
@@ -124,10 +137,21 @@ sealed class PureGateClient : IBenchClient
           next = Pending;
           Pending = Outgoing;
           Outgoing = next;
+          ends = PendingEnds;
+          PendingEnds = OutgoingEnds;
+          OutgoingEnds = ends;
         }
 
-        await Socket.SendAsync(next.WrittenMemory, WebSocketMessageType.Binary, endOfMessage: true, CancellationToken.None);
+        var start = 0;
+        foreach (var end in ends)
+        {
+          await Socket.SendAsync(next.WrittenMemory[start..end], WebSocketMessageType.Binary, endOfMessage: true, CancellationToken.None);
+          start = end;
+        }
+
+        await Socket.SendAsync(next.WrittenMemory[start..], WebSocketMessageType.Binary, endOfMessage: true, CancellationToken.None);
         next.ResetWrittenCount();
+        ends.Clear();
       }
     }
     catch (Exception exception) when (exception is WebSocketException or ObjectDisposedException)
@@ -179,6 +203,9 @@ sealed class PureGateClient : IBenchClient
       switch (frame.Kind)
       {
         case FrameKind.Welcome:
+          var maxMessage = MaxMessageOf(frame.Payload);
+          lock (Gate)
+            MaxMessage = maxMessage;
           Welcomed.TrySetResult();
           break;
         case FrameKind.Response when Calls.TryRemove(frame.Id, out var answer):
@@ -200,6 +227,22 @@ sealed class PureGateClient : IBenchClient
 
     Unacknowledged = 0;
     Write(new Frame { Kind = FrameKind.Ack, Count = (uint)ReceivedCount });
+  }
+
+  // The server's message limit, from its Welcome.
+  static int MaxMessageOf(ReadOnlySpan<byte> welcome)
+  {
+    var reader = new Utf8JsonReader(welcome);
+    while (reader.Read())
+    {
+      if (reader.TokenType == JsonTokenType.PropertyName && reader.CurrentDepth == 1 && reader.ValueTextEquals("maxMessage"u8))
+      {
+        reader.Read();
+        return reader.GetInt32();
+      }
+    }
+
+    throw new InvalidDataException("Welcome has no maxMessage.");
   }
 
   public async ValueTask DisposeAsync()

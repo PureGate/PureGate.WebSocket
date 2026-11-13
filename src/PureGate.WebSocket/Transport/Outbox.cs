@@ -48,6 +48,10 @@ sealed class Link(NetWebSocket socket, HttpContext context) : IThreadPoolWorkIte
   // Nothing more will be sent.
   public bool Done;
 
+  // Let go of: its receive loop ended. Released completes then, and exists only for a link something waits on.
+  public bool Detached;
+  public TaskCompletionSource Released;
+
   public WebSocketCloseStatus CloseStatus;
   public string CloseReason;
 
@@ -326,17 +330,28 @@ sealed class Outbox(long queueLimit, long replayLimit)
   // Lets go of a link whose socket is gone: nothing more is sent on it, and its buffers go back to the pool.
   public void Detach(Link link)
   {
+    TaskCompletionSource released;
     lock (Gate)
     {
       if (Attached == link)
         Attached = null;
 
       link.Done = true;
+      link.Detached = true;
+      released = link.Released;
       if (!link.Sending)
         ReturnQueued(link);
     }
 
     link.Stop();
+    released?.TrySetResult();
+  }
+
+  // Completes once link is let go of: the client answered its close frame, or the socket failed.
+  public Task WhenDetached(Link link)
+  {
+    lock (Gate)
+      return link.Detached ? Task.CompletedTask : (link.Released ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
   }
 
   // The session ended: nothing more is written, and the buffers go back to the pool.
