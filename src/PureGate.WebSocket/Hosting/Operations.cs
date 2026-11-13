@@ -110,13 +110,10 @@ sealed class RequestOperation<TRequest, TResponse>(
     async Task RunAsync()
     {
       call.Activity = Telemetry.StartActivity(operation.Name, call.TraceParent, connection.Id);
-      TResponse result = default;
+      TResponse result;
       try
       {
-        if (operation.HasPipeline)
-          await operation.RunPipelineAsync(connection, call, async () => result = await operation.Invoke(value, call));
-        else
-          result = await operation.Invoke(value, call);
+        result = operation.HasPipeline ? await RunPipelineAsync() : await operation.Invoke(value, call);
       }
       catch (Exception exception)
       {
@@ -125,6 +122,14 @@ sealed class RequestOperation<TRequest, TResponse>(
       }
 
       await connection.CompleteCallAsync(call, operation.Response, result);
+    }
+
+    // Apart, so the closure its result needs is created only for operations with a pipeline.
+    async ValueTask<TResponse> RunPipelineAsync()
+    {
+      TResponse result = default;
+      await operation.RunPipelineAsync(connection, call, async () => result = await operation.Invoke(value, call));
+      return result;
     }
   }
 
@@ -168,7 +173,7 @@ sealed class ClientEventOperation<T>(
       try
       {
         if (operation.HasPipeline)
-          await operation.RunPipelineAsync(connection, call, () => operation.Handler(value, call, call.CancellationToken));
+          await RunPipelineAsync(connection, call);
         else
           await operation.Handler(value, call, call.CancellationToken);
       }
@@ -190,6 +195,10 @@ sealed class ClientEventOperation<T>(
         await call.DisposeAsync();
       }
     }
+
+    // Apart, so the closure over the call is created only for events with a pipeline.
+    ValueTask RunPipelineAsync(WebSocketConnection connection, WebSocketCall call) =>
+      operation.RunPipelineAsync(connection, call, () => operation.Handler(value, call, call.CancellationToken));
   }
 }
 
@@ -319,13 +328,10 @@ sealed class UploadOperation<TRequest, TItem, TResponse>(
     async Task RunAsync()
     {
       upload.Call.Activity = Telemetry.StartActivity(operation.Name, upload.Call.TraceParent, connection.Id);
-      TResponse result = default;
+      TResponse result;
       try
       {
-        if (operation.HasPipeline)
-          await operation.RunPipelineAsync(connection, upload.Call, async () => result = await HandleAsync());
-        else
-          result = await HandleAsync();
+        result = operation.HasPipeline ? await RunPipelineAsync() : await HandleAsync();
       }
       catch (Exception exception)
       {
@@ -334,6 +340,14 @@ sealed class UploadOperation<TRequest, TItem, TResponse>(
       }
 
       await connection.CompleteUploadAsync(upload, operation.Response, result);
+    }
+
+    // Apart, so the closure its result needs is created only for uploads with a pipeline.
+    async ValueTask<TResponse> RunPipelineAsync()
+    {
+      TResponse result = default;
+      await operation.RunPipelineAsync(connection, upload.Call, async () => result = await HandleAsync());
+      return result;
     }
 
     // Credit starts when the handler does: an upload its authorization refuses never takes an item.

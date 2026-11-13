@@ -76,8 +76,9 @@ sealed class WebSocketHub : IWebSocketHub
       Leave(Groups, group, connection);
   }
 
-  // Sends one event to every connection the target names. The payload is serialized once per endpoint, and
-  // every connection copies the same bytes.
+  // Sends one event to every connection the target names. The payload is serialized once per endpoint, and every
+  // connection copies the same bytes. The indexes are enumerated as they are, without a snapshot: a connection that
+  // joins or leaves meanwhile may or may not get the event.
   internal void Send<T>(in WebSocketTarget target, ServerEvent<T> descriptor, T payload)
   {
     ArgumentNullException.ThrowIfNull(descriptor);
@@ -87,46 +88,76 @@ sealed class WebSocketHub : IWebSocketHub
     if (!mapped)
       throw new InvalidOperationException($"The event '{descriptor.Name}' is not mapped on any endpoint: call MapEvent first.");
 
-    EndpointState serializedFor = null;
-    ServerEventInfo<T> info = null;
-    PooledBuffer buffer = null;
+    // One connection sends at once; for more, each send runs on the thread pool, so they go out in parallel.
+    var delivery = new Delivery<T>(descriptor, payload, target.ExceptConnection, dispatch: target.Kind != TargetKind.Connection);
     try
     {
-      foreach (var connection in Resolve(target))
+      switch (target.Kind)
       {
-        if (connection == target.ExceptConnection)
-          continue;
+        case TargetKind.All:
+          foreach (var pair in Connections)
+            delivery.To(pair.Value);
+          break;
+        case TargetKind.User:
+          if (Users.TryGetValue(target.Key, out var user))
+          {
+            foreach (var pair in user)
+              delivery.To(pair.Key);
+          }
 
-        if (connection.Endpoint != serializedFor)
-        {
-          // An endpoint that does not map the event leaves the payload serialized for the last one that does.
-          if (!connection.Endpoint.TryGetEvent(descriptor, out var found))
-            continue;
+          break;
+        case TargetKind.Group:
+          if (Groups.TryGetValue(target.Key, out var group))
+          {
+            foreach (var pair in group)
+              delivery.To(pair.Key);
+          }
 
-          info = found;
-          buffer?.Return();
-          buffer = new PooledBuffer(256);
-          info.Codec.Write(buffer, payload);
-          serializedFor = connection.Endpoint;
-        }
-
-        connection.WriteEvent(info.Descriptor.Name, info.Descriptor.NameUtf8, info.Codec.IsBinary, buffer.WrittenSpan);
+          break;
+        case TargetKind.Connection:
+          if (Connections.TryGetValue(target.Key, out var connection))
+            delivery.To(connection);
+          break;
+        default:
+          throw new InvalidOperationException("This target was not made by a hub.");
       }
     }
     finally
     {
-      buffer?.Return();
+      delivery.Dispose();
     }
   }
 
-  IEnumerable<WebSocketConnection> Resolve(WebSocketTarget target) => target.Kind switch
+  // One event on its way to the connections of a target, serialized for the endpoint of the last connection.
+  struct Delivery<T>(ServerEvent<T> descriptor, T payload, WebSocketConnection except, bool dispatch) : IDisposable
   {
-    TargetKind.All => Connections.Values,
-    TargetKind.User => Users.TryGetValue(target.Key, out var user) ? user.Keys : [],
-    TargetKind.Group => Groups.TryGetValue(target.Key, out var group) ? group.Keys : [],
-    TargetKind.Connection => Connections.TryGetValue(target.Key, out var connection) ? [connection] : [],
-    _ => throw new InvalidOperationException("This target was not made by a hub."),
-  };
+    EndpointState SerializedFor;
+    ServerEventInfo<T> Info;
+    PooledBuffer Buffer;
+
+    public void To(WebSocketConnection connection)
+    {
+      if (connection == except)
+        return;
+
+      if (connection.Endpoint != SerializedFor)
+      {
+        // An endpoint that does not map the event leaves the payload serialized for the last one that does.
+        if (!connection.Endpoint.TryGetEvent(descriptor, out var found))
+          return;
+
+        Info = found;
+        Buffer?.Return();
+        Buffer = new PooledBuffer(256);
+        Info.Codec.Write(Buffer, payload);
+        SerializedFor = connection.Endpoint;
+      }
+
+      connection.WriteEvent(Info.Descriptor.Name, Info.Descriptor.NameUtf8, Info.Codec.IsBinary, Buffer.WrittenSpan, dispatch);
+    }
+
+    public void Dispose() => Buffer?.Return();
+  }
 
   static void Join(
       ConcurrentDictionary<string, ConcurrentDictionary<WebSocketConnection, byte>> index,

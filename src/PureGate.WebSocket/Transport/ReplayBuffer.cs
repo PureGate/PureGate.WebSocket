@@ -8,6 +8,7 @@ namespace PureGate.WebSocket.Transport;
 // index. The outbox numbers them and guards this with its lock.
 sealed class ReplayBuffer(long limit)
 {
+  const int MinChunkBytes = 512;
   const int ChunkBytes = 64 * 1024;
 
   readonly Queue<Chunk> Chunks = new();
@@ -25,9 +26,11 @@ sealed class ReplayBuffer(long limit)
 
   public void Append(ReadOnlySpan<byte> frame)
   {
+    // A new chunk is about as large as what the buffer holds already: a session that sends now and then keeps a
+    // small one instead of 64 KiB, which a broadcast would otherwise take for every connection at once.
     if (Last is null || Last.Free < frame.Length)
     {
-      Last = new Chunk(Math.Max(ChunkBytes, frame.Length));
+      Last = new Chunk(Math.Max((int)Math.Clamp(Bytes, MinChunkBytes, ChunkBytes), frame.Length));
       Chunks.Enqueue(Last);
     }
 

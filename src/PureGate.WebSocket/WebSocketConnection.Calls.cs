@@ -14,8 +14,17 @@ public sealed partial class WebSocketConnection
 {
   const string GenericFailure = "The handler failed.";
 
+  // The spare cancellation sources a connection keeps. More would hold on to what one busy moment needed for as
+  // long as the connection lasts.
+  const int SpareCancellationLimit = 8;
+
   readonly Dictionary<uint, WebSocketCall> ActiveCalls = [];
   readonly Lock CallsGate = new();
+
+  // Cancellation sources of finished calls, linked to the session's token, for later calls to reuse as Kestrel reuses
+  // RequestAborted's: TryReset keeps the link and the deadline's timer, so neither is created for every call.
+  readonly Stack<CancellationTokenSource> SpareCancellations = new();
+  readonly Lock SpareCancellationsGate = new();
 
   enum CallOutcome
   {
@@ -54,23 +63,64 @@ public sealed partial class WebSocketConnection
 
   void OnCancel(uint id)
   {
-    WebSocketCall call;
+    // Under the lock, the call is still active and owns its cancellation source. A Cancel for an exchange that
+    // already ended crossed its end on the wire.
     lock (CallsGate)
     {
-      if (!ActiveCalls.TryGetValue(id, out call) && Downloads.TryGetValue(id, out var stream))
-        call = stream.Call;
+      if (ActiveCalls.TryGetValue(id, out var call))
+      {
+        call.CancelByClient();
+        return;
+      }
+
+      if (Downloads.TryGetValue(id, out var stream))
+      {
+        stream.Call.CancelByClient();
+        return;
+      }
     }
 
-    // A Cancel for an exchange that already ended crossed its end on the wire.
-    if (call is not null)
-      call.CancelByClient();
-    else
-      CancelUpload(id);
+    CancelUpload(id);
+  }
+
+  internal CancellationTokenSource RentCancellation()
+  {
+    lock (SpareCancellationsGate)
+    {
+      while (SpareCancellations.TryPop(out var spare))
+      {
+        // Cancelled while it waited, when the session ended.
+        if (!spare.IsCancellationRequested)
+          return spare;
+
+        spare.Dispose();
+      }
+    }
+
+    return CancellationTokenSource.CreateLinkedTokenSource(Closed);
+  }
+
+  // A source whose token fired, or whose timer did, cannot be reset, and is disposed instead.
+  internal void ReturnCancellation(CancellationTokenSource cancellation)
+  {
+    if (cancellation.TryReset())
+    {
+      lock (SpareCancellationsGate)
+      {
+        if (SpareCancellations.Count < SpareCancellationLimit)
+        {
+          SpareCancellations.Push(cancellation);
+          return;
+        }
+      }
+    }
+
+    cancellation.Dispose();
   }
 
   internal WebSocketCall BeginCall(Operation operation, scoped in Frame frame)
   {
-    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes, Closed) { Lease = TakeLease() };
+    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes) { Lease = TakeLease() };
     if (frame.Has(FrameFlags.HasTimeout))
       call.SetDeadline(frame.Timeout);
 
@@ -157,7 +207,7 @@ public sealed partial class WebSocketConnection
 
   void SendResult<TResponse>(WebSocketCall call, PayloadCodec<TResponse> codec, TResponse result)
   {
-    var buffer = new PooledBuffer(256);
+    var buffer = PooledBuffer.Scratch();
     try
     {
       codec.Write(buffer, result);
@@ -178,7 +228,7 @@ public sealed partial class WebSocketConnection
     }
     finally
     {
-      buffer.Return();
+      buffer.ReturnScratch();
     }
   }
 
@@ -191,7 +241,7 @@ public sealed partial class WebSocketConnection
       return;
     }
 
-    var buffer = new PooledBuffer(256);
+    var buffer = PooledBuffer.Scratch();
     try
     {
       try
@@ -210,7 +260,7 @@ public sealed partial class WebSocketConnection
     }
     finally
     {
-      buffer.Return();
+      buffer.ReturnScratch();
     }
   }
 

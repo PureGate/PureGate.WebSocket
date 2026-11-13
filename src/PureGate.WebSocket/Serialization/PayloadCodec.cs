@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 
@@ -74,7 +75,6 @@ static class PayloadCodecs
 
   sealed class JsonCodec<T>(JsonTypeInfo<T> typeInfo, JsonSerializerOptions options) : PayloadCodec<T>
   {
-    readonly JsonWriterOptions WriterOptions = new() { Encoder = options.Encoder, SkipValidation = true };
 
     public override bool IsBinary => false;
 
@@ -97,8 +97,36 @@ static class PayloadCodecs
 
     public override void Write(IBufferWriter<byte> output, T value)
     {
-      using var writer = new Utf8JsonWriter(output, WriterOptions);
-      JsonSerializer.Serialize(writer, value, typeInfo);
+      var writer = JsonWriters.Rent(output, options.Encoder);
+      try
+      {
+        JsonSerializer.Serialize(writer, value, typeInfo);
+      }
+      finally
+      {
+        JsonWriters.Return(writer);
+      }
     }
   }
+}
+
+// One Utf8JsonWriter per thread, reset onto each output instead of created for it, as System.Text.Json keeps its own.
+// A payload written from inside the serialization of another, by a converter, gets a writer of its own.
+static class JsonWriters
+{
+  [ThreadStatic]
+  static Utf8JsonWriter Cached;
+
+  public static Utf8JsonWriter Rent(IBufferWriter<byte> output, JavaScriptEncoder encoder)
+  {
+    var writer = Cached;
+    if (writer is null || writer.Options.Encoder != encoder)
+      return new Utf8JsonWriter(output, new JsonWriterOptions { Encoder = encoder, SkipValidation = true });
+
+    Cached = null;
+    writer.Reset(output);
+    return writer;
+  }
+
+  public static void Return(Utf8JsonWriter writer) => Cached = writer;
 }

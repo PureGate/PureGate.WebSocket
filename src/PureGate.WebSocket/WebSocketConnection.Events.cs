@@ -21,7 +21,7 @@ public sealed partial class WebSocketConnection
     if (!Endpoint.TryGetEvent(serverEvent, out var info))
       throw new InvalidOperationException($"The event '{serverEvent.Name}' is not mapped on this endpoint: call MapEvent first.");
 
-    var buffer = new PooledBuffer(256);
+    var buffer = PooledBuffer.Scratch();
     try
     {
       info.Codec.Write(buffer, payload);
@@ -29,15 +29,15 @@ public sealed partial class WebSocketConnection
     }
     finally
     {
-      buffer.Return();
+      buffer.ReturnScratch();
     }
 
     return ValueTask.CompletedTask;
   }
 
   // Sends an event, unless the connection is draining for a shutdown, or the page is too far behind and the policy
-  // drops events.
-  internal void WriteEvent(string name, ReadOnlySpan<byte> nameUtf8, bool binary, ReadOnlySpan<byte> payload)
+  // drops events. A broadcast dispatches the send to the thread pool (Outbox.Write).
+  internal void WriteEvent(string name, ReadOnlySpan<byte> nameUtf8, bool binary, ReadOnlySpan<byte> payload, bool dispatch = false)
   {
     if (Draining)
       return;
@@ -55,7 +55,7 @@ public sealed partial class WebSocketConnection
       Payload = payload,
     };
 
-    switch (Outbox.Write(in frame, name, nameUtf8))
+    switch (Outbox.Write(in frame, name, nameUtf8, dispatch))
     {
       case WriteResult.TooLarge:
         Log.EventTooLarge(Logger, Id, name);
@@ -114,7 +114,7 @@ public sealed partial class WebSocketConnection
   }
 
   internal WebSocketCall BeginEvent(string name, string traceParent, System.Threading.RateLimiting.RateLimitLease lease) =>
-    new(this, name, 0, traceParent, Endpoint.Scopes, Closed) { Lease = lease };
+    new(this, name, 0, traceParent, Endpoint.Scopes) { Lease = lease };
 
   internal void DropEvent(string name, string reason)
   {

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Net.WebSockets;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using PureGate.WebSocket.Diagnostics;
 using PureGate.WebSocket.Hosting;
@@ -385,6 +386,8 @@ public sealed partial class WebSocketConnection
   }
 
   // Receives one whole message into the link's buffer and returns its length, or -1 when the browser closed.
+  // Pooled, since nearly every message waits for the socket.
+  [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
   async ValueTask<int> ReceiveMessageAsync(Link link)
   {
     var limit = Options.MaxMessageBytes;

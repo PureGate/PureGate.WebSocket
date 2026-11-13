@@ -110,7 +110,7 @@ public sealed partial class WebSocketConnection
       TRequest payload,
       TimeSpan timeout)
   {
-    var buffer = new PooledBuffer(256);
+    var buffer = PooledBuffer.Scratch();
     try
     {
       info.Request.Write(buffer, payload);
@@ -142,7 +142,7 @@ public sealed partial class WebSocketConnection
     }
     finally
     {
-      buffer.Return();
+      buffer.ReturnScratch();
     }
   }
 

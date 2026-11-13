@@ -21,7 +21,7 @@ enum WriteResult
 
 // One accepted WebSocket of a session, with its own send queue. A session has at most one link attached at a time;
 // a resume attaches a new one. The outbox's lock guards the send state.
-sealed class Link(NetWebSocket socket, HttpContext context)
+sealed class Link(NetWebSocket socket, HttpContext context) : IThreadPoolWorkItem
 {
   readonly TaskCompletionSource Stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -32,6 +32,13 @@ sealed class Link(NetWebSocket socket, HttpContext context)
   public Queue<PooledBuffer> Ready { get; } = new();
 
   public PooledBuffer Current;
+
+  // The last message's buffer once sent, without its array, for the next message instead of a new one.
+  public PooledBuffer Spare;
+
+  // The outbox this link is attached to, which a dispatched send runs for.
+  public Outbox Owner;
+
   public long Queued;
   public bool Sending;
 
@@ -58,6 +65,9 @@ sealed class Link(NetWebSocket socket, HttpContext context)
   public Task Completion => Stopped.Task;
 
   public void Stop() => Stopped.TrySetResult();
+
+  // A send the outbox dispatched to the thread pool.
+  void IThreadPoolWorkItem.Execute() => _ = Owner.SendAsync(this);
 }
 
 // The frames a session sends (docs/PROTOCOL.md, Messages and frames; Acknowledgement and resume). Writers copy their
@@ -105,8 +115,10 @@ sealed class Outbox(long queueLimit, long replayLimit)
   public WriteResult Write(scoped in Frame frame) => Write(in frame, null, default);
 
   // Writes a Request or Event, naming it with name: a reference when the client already has the name, a definition
-  // the first time, or the literal name once the table is full.
-  public WriteResult Write(scoped in Frame frame, string name, ReadOnlySpan<byte> nameUtf8)
+  // the first time, or the literal name once the table is full. A writer that starts the send runs it, unless it
+  // dispatches it to the thread pool: a broadcast does, so its connections send in parallel instead of one after
+  // another on its thread.
+  public WriteResult Write(scoped in Frame frame, string name, ReadOnlySpan<byte> nameUtf8, bool dispatch = false)
   {
     Link start = null;
     var lost = false;
@@ -181,7 +193,12 @@ sealed class Outbox(long queueLimit, long replayLimit)
     }
 
     if (start is not null)
-      _ = SendAsync(start);
+    {
+      if (dispatch)
+        ThreadPool.UnsafeQueueUserWorkItem(start, preferLocal: false);
+      else
+        _ = SendAsync(start);
+    }
 
     return WriteResult.Written;
   }
@@ -203,6 +220,7 @@ sealed class Outbox(long queueLimit, long replayLimit)
         return false;
 
       link.MaxMessage = MaxMessage;
+      link.Owner = this;
       Attached = link;
       var buffer = Reserve(link, FrameWriter.GetLength(in welcome));
       FrameWriter.Write(buffer, in welcome);
@@ -303,7 +321,7 @@ sealed class Outbox(long queueLimit, long replayLimit)
   }
 
   // The buffer the next frame of length bytes goes to: the current message, or a new one when it would grow past
-  // what one message may hold.
+  // what one message may hold. A new one starts small, since a broadcast takes one for each connection at once.
   PooledBuffer Reserve(Link link, int length)
   {
     var limit = Math.Min(CoalesceBytes, link.MaxMessage);
@@ -313,13 +331,20 @@ sealed class Outbox(long queueLimit, long replayLimit)
       link.Current = null;
     }
 
-    link.Current ??= new PooledBuffer(Math.Max(length, 4096));
+    if (link.Current is null)
+    {
+      var capacity = Math.Max(length, 256);
+      link.Current = link.Spare?.Rent(capacity) ?? new PooledBuffer(capacity);
+      link.Spare = null;
+    }
+
     link.Queued += length;
     return link.Current;
   }
 
-  async Task SendAsync(Link link)
+  internal async Task SendAsync(Link link)
   {
+    PooledBuffer sent = null;
     try
     {
       while (true)
@@ -327,6 +352,8 @@ sealed class Outbox(long queueLimit, long replayLimit)
         PooledBuffer next;
         lock (Gate)
         {
+          link.Spare ??= sent;
+          sent = null;
           if (link.Done)
           {
             ReturnQueued(link);
@@ -371,6 +398,8 @@ sealed class Outbox(long queueLimit, long replayLimit)
         {
           next.Return();
         }
+
+        sent = next;
       }
     }
     catch (Exception exception) when (exception is WebSocketException or ObjectDisposedException or OperationCanceledException)

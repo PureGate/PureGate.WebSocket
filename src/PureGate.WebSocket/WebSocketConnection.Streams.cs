@@ -63,7 +63,7 @@ public sealed partial class WebSocketConnection
 
   internal DownloadState BeginDownload(Operation operation, scoped in Frame frame)
   {
-    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes, Closed) { Lease = TakeLease() };
+    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes) { Lease = TakeLease() };
     var stream = new DownloadState(call, frame.Credit);
     lock (CallsGate)
       Downloads.Add(frame.Id, stream);
@@ -75,7 +75,7 @@ public sealed partial class WebSocketConnection
   // connection is going away.
   internal bool WriteStreamItem<TItem>(DownloadState stream, PayloadCodec<TItem> codec, TItem item)
   {
-    var buffer = new PooledBuffer(256);
+    var buffer = PooledBuffer.Scratch();
     try
     {
       codec.Write(buffer, item);
@@ -95,7 +95,7 @@ public sealed partial class WebSocketConnection
     }
     finally
     {
-      buffer.Return();
+      buffer.ReturnScratch();
     }
   }
 
@@ -144,7 +144,7 @@ public sealed partial class WebSocketConnection
 
   internal UploadState<TItem> BeginUpload<TItem>(Operation operation, scoped in Frame frame, PayloadCodec<TItem> codec)
   {
-    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes, Closed) { Lease = TakeLease() };
+    var call = new WebSocketCall(this, operation.Name, frame.Id, ReadTrace(in frame), Endpoint.Scopes) { Lease = TakeLease() };
     var upload = new UploadState<TItem>(frame.Id, call, codec, this);
     lock (CallsGate)
       Uploads.Add(frame.Id, upload);
@@ -227,6 +227,8 @@ public sealed partial class WebSocketConnection
       upload.ClientEnded = true;
       if (ended)
         Uploads.Remove(id);
+      else
+        upload.Call.CancelByClient();
     }
 
     if (ended)
@@ -235,7 +237,6 @@ public sealed partial class WebSocketConnection
       return;
     }
 
-    upload.Call.CancelByClient();
     upload.Finish(new OperationCanceledException("The browser cancelled the upload."));
   }
 
