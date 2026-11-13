@@ -1,4 +1,4 @@
-import type { ConnectOptions, HandlerContext, WebSocketConstructor } from "./contract.ts";
+import type { ConnectOptions, HandlerContext, PayloadFormat, WebSocketConstructor } from "./contract.ts";
 import { CallError, connectionClosed } from "./errors.ts";
 import { decodePayload, encodePayload, type Payload } from "./payload.ts";
 import { errorCodeNames, errorCodeOf, isValidCustomCode } from "./protocol/errors.ts";
@@ -87,6 +87,7 @@ interface Welcome {
   resumeWindow?: number;
   expires?: number;
   contract?: string;
+  format?: string;
   route?: string;
 }
 
@@ -264,6 +265,7 @@ export class Session {
     };
     if (token !== undefined) hello.token = token;
     if (options.contractHash !== undefined) hello.contract = options.contractHash;
+    if (options.format !== undefined) hello.format = options.format.name;
     if (this.#resuming) hello.resume = { session: this.#id, received: this.#received };
 
     const frame = this.#frame(FrameKind.Hello);
@@ -359,7 +361,9 @@ export class Session {
         welcome.events >= initialEvents &&
         welcome.maxMessage >= minimumMessage
       ) ||
-      (resumed && !this.#resuming)
+      (resumed && !this.#resuming) ||
+      // A server that ignored the format would read the payloads as JSON.
+      welcome.format !== this.#owner.options.format?.name
     ) {
       throw new ProtocolError("invalid_handshake");
     }
@@ -436,7 +440,7 @@ export class Session {
     if (call === undefined) {
       const upload = this.#uploads.get(frame.id);
       if (upload === undefined || upload.answered) throw new ProtocolError("unknown_exchange");
-      const [error, result] = resultOf(frame);
+      const [error, result] = resultOf(frame, this.#owner.options.format);
       upload.onResponse(error, result);
       return;
     }
@@ -444,7 +448,7 @@ export class Session {
     this.#pending.delete(frame.id);
     this.#inFlight--;
     if (!call.settled) {
-      const [error, result] = resultOf(frame);
+      const [error, result] = resultOf(frame, this.#owner.options.format);
       this.#owner.settle(call, error, result);
     }
 
@@ -489,7 +493,7 @@ export class Session {
 
     let event: unknown;
     try {
-      event = decodePayload((frame.flags & FrameFlags.Binary) !== 0, frame.payload);
+      event = decodePayload((frame.flags & FrameFlags.Binary) !== 0, frame.payload, this.#owner.options.format);
     } catch (error) {
       this.#owner.reportError(error);
       return;
@@ -610,9 +614,9 @@ export class Session {
 
     let request: unknown;
     try {
-      request = decodePayload((frame.flags & FrameFlags.Binary) !== 0, frame.payload);
+      request = decodePayload((frame.flags & FrameFlags.Binary) !== 0, frame.payload, this.#owner.options.format);
     } catch (error) {
-      this.#answerError(id, errorCodeOf("invalid_payload"), "", `The request is not valid JSON: ${String(error)}`);
+      this.#answerError(id, errorCodeOf("invalid_payload"), "", `The request could not be read: ${String(error)}`);
       return;
     }
 
@@ -657,7 +661,7 @@ export class Session {
     } else {
       let payload: Payload;
       try {
-        payload = encodePayload(result);
+        payload = encodePayload(result, this.#owner.options.format);
       } catch (encodeError) {
         this.#answerError(id, ...errorFields(encodeError));
         return;
@@ -968,12 +972,12 @@ function errorOf(frame: Frame): CallError {
 }
 
 /** A Response's outcome: its error, or its result. */
-function resultOf(frame: Frame): [CallError | undefined, unknown] {
+function resultOf(frame: Frame, format: PayloadFormat | undefined): [CallError | undefined, unknown] {
   if (frame.flags & FrameFlags.HasError) return [errorOf(frame), undefined];
   try {
-    return [undefined, decodePayload((frame.flags & FrameFlags.Binary) !== 0, frame.payload)];
+    return [undefined, decodePayload((frame.flags & FrameFlags.Binary) !== 0, frame.payload, format)];
   } catch (error) {
-    return [new CallError("invalid_payload", `The result is not valid JSON: ${String(error)}`), undefined];
+    return [new CallError("invalid_payload", `The result could not be read: ${String(error)}`), undefined];
   }
 }
 

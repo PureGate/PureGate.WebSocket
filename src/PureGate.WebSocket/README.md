@@ -78,6 +78,33 @@ ws.MapRequest<Order>("orders.place", PlaceAsync)
   });
 ```
 
+## Payload formats
+
+Payloads are JSON unless the browser asks for another format, such as MessagePack. Bring the library you like: wrap it in an `IPayloadFormat`, and add it to the options. Browsers that ask for no format keep using JSON.
+
+```csharp
+sealed class MessagePackFormat(MessagePackSerializerOptions options) : IPayloadFormat
+{
+  public string Name => "msgpack";
+
+  public void Write<T>(IBufferWriter<byte> output, T value) => MessagePackSerializer.Serialize(output, value, options);
+
+  public T Read<T>(ReadOnlyMemory<byte> payload) => MessagePackSerializer.Deserialize<T>(payload, options);
+}
+
+builder.Services.AddPureGateWebSocket(options => options.PayloadFormats.Add(new MessagePackFormat(messagePackOptions)));
+```
+
+The browser asks for it by name, with a JavaScript MessagePack library:
+
+```ts
+import { decode, encode } from "@msgpack/msgpack";
+
+const conn = connect<Contract>("/ws", { contractHash, format: { name: "msgpack", encode, decode } });
+```
+
+`contract.ts` describes each value as its JSON, so a format must read and write the same shapes: objects as maps keyed by their JSON property names, not as arrays. `byte[]` and `ReadOnlyMemory<byte>` stay raw bytes in every format, and error details stay JSON. `Read` gets a slice of the received message, which is reused once it returns, so the value it reads must not keep that memory.
+
 ## Options
 
 `AddPureGateWebSocket(options => …)` sets them for every endpoint, and `MapPureGateWebSocket(pattern, options => …)` for one. The defaults suit untrusted clients on the public internet; among them:
@@ -89,6 +116,7 @@ ws.MapRequest<Order>("orders.place", PlaceAsync)
 | `MaxMessageBytes` | 64 KiB | The largest message accepted. Larger data goes through streams. |
 | `ResumeWindow` | 30 s | How long a dropped session waits for the browser. `TimeSpan.Zero` turns resume off. |
 | `Authenticate` | none | Validates a token from the browser, for apps that cannot use cookies. |
+| `PayloadFormats` | none | [Payload formats](#payload-formats) besides JSON that browsers may ask for. |
 | `RateLimiter` | none | A `RateLimiter` per connection. |
 | `AllowedOrigins` | the endpoint's own | Origins allowed to connect, or `"*"`. |
 | `SlowConsumer` | `Close` | What happens to a browser that falls too far behind: close it, and let it resume, or drop events for it. |

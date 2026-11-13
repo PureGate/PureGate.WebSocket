@@ -3,11 +3,11 @@ using PureGate.WebSocket.Serialization;
 
 namespace PureGate.WebSocket.Hosting;
 
-// A call to the browser waiting for its Response. Complete runs on the receive loop, so it reads the payload
-// before the buffer is reused; continuations run on the thread pool.
+// A call to the browser waiting for its Response. Complete runs on the receive loop, so it reads the payload, which is
+// the frame's as memory, before the buffer is reused; continuations run on the thread pool.
 abstract class PendingInvoke
 {
-  public abstract void Complete(scoped in Frame frame);
+  public abstract void Complete(scoped in Frame frame, ReadOnlyMemory<byte> payload);
 
   public abstract void Fail(Exception exception);
 }
@@ -18,7 +18,7 @@ sealed class PendingInvoke<T>(PayloadCodec<T> codec) : PendingInvoke
 
   public Task<T> Task => Completion.Task;
 
-  public override void Complete(scoped in Frame frame)
+  public override void Complete(scoped in Frame frame, ReadOnlyMemory<byte> payload)
   {
     if (frame.Has(FrameFlags.HasError))
     {
@@ -28,7 +28,7 @@ sealed class PendingInvoke<T>(PayloadCodec<T> codec) : PendingInvoke
 
     try
     {
-      Completion.TrySetResult(codec.Read(frame.Payload, frame.Has(FrameFlags.Binary)));
+      Completion.TrySetResult(codec.Read(payload, frame.Has(FrameFlags.Binary)));
     }
     catch (InvalidPayloadException exception)
     {

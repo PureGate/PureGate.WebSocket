@@ -1,4 +1,4 @@
-import type { CallStream, UploadSource } from "./contract.ts";
+import type { CallStream, PayloadFormat, UploadSource } from "./contract.ts";
 import { CallError } from "./errors.ts";
 import { decodePayload, encodePayload, type Payload } from "./payload.ts";
 import { ProtocolError } from "./protocol/violation.ts";
@@ -8,6 +8,8 @@ import { ProtocolError } from "./protocol/violation.ts";
 
 /** Where a stream waits for a session to open it. */
 export interface StreamQueue {
+  /** The connection's payload format, for the items; JSON when there is none. */
+  readonly format?: PayloadFormat | undefined;
   /** Opens the stream when a window has room. It may refuse it, or report the connection closed, at once. */
   open(stream: Exchange): void;
   /** Takes back a stream that has not opened yet. */
@@ -132,9 +134,9 @@ export class Download<T> implements CallStream<T>, Exchange {
 
     let value: unknown;
     try {
-      value = decodePayload(binary, bytes);
+      value = decodePayload(binary, bytes, this.#host.format);
     } catch (error) {
-      this.#stop(new CallError("invalid_payload", `An item is not valid JSON: ${String(error)}`));
+      this.#stop(new CallError("invalid_payload", `An item could not be read: ${String(error)}`));
       return;
     }
 
@@ -416,7 +418,7 @@ export class Upload implements Exchange {
 
         let payload: Payload;
         try {
-          payload = encodePayload(next.value);
+          payload = encodePayload(next.value, this.#host.format);
         } catch (error) {
           this.#fail(error);
           return;

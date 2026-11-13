@@ -146,4 +146,5 @@ static class CloseCodes
   public const int ContractRejected = 4004;
   public const int SessionReplaced = 4005;
   public const int Reconnecting = 4006;
+  public const int FormatUnsupported = 4007;
 }

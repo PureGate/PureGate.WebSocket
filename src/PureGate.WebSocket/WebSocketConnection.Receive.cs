@@ -28,6 +28,12 @@ public sealed partial class WebSocketConnection
   // The link whose message Process is handling, under LinkGate.
   Link Processing;
 
+  // The message Process is handling, for formats that read payloads from memory (PayloadOf).
+  ReadOnlyMemory<byte> Message;
+
+  // The payload format the browser asked for in Hello, as an index into the codecs: 0 for JSON (EndpointState.Formats).
+  internal int Format { get; private set; }
+
   // Welcome went out: the session is the browser's, and resumable if resume is on.
   bool Started;
 
@@ -49,6 +55,10 @@ public sealed partial class WebSocketConnection
       if (hello is not null)
       {
         ContractStatus = CheckContract(hello.Contract);
+        Format = Endpoint.FormatIndex(hello.Format);
+        if (Format < 0)
+          throw new CloseException((WebSocketCloseStatus)CloseCodes.FormatUnsupported, "The server has no payload format of that name.");
+
         identity = await AuthenticateAsync(link, hello.Token);
       }
     }
@@ -117,7 +127,7 @@ public sealed partial class WebSocketConnection
         while (true)
         {
           var length = await ReceiveMessageAsync(link);
-          if (length < 0 || !Handle(link, link.ReceiveBuffer.AsSpan(0, length)))
+          if (length < 0 || !Handle(link, link.ReceiveBuffer.AsMemory(0, length)))
             break;
         }
 
@@ -232,7 +242,7 @@ public sealed partial class WebSocketConnection
 
   // Processes one message, runs the handlers it started, and sends what both wrote in one go. False when a resume
   // replaced link: the session counts nothing more from it.
-  bool Handle(Link link, ReadOnlySpan<byte> message)
+  bool Handle(Link link, ReadOnlyMemory<byte> message)
   {
     Outbox.Cork();
     try
@@ -368,6 +378,7 @@ public sealed partial class WebSocketConnection
       Heartbeat = (long)Options.Heartbeat.TotalMilliseconds,
       ResumeWindow = (long)Options.ResumeWindow.TotalMilliseconds,
       Contract = ContractStatus,
+      Format = Format == 0 ? null : Endpoint.Formats[Format - 1].Name,
       Expires = ExpiresInMilliseconds(),
       Route = Options.ResumeRoute,
     };
@@ -388,17 +399,31 @@ public sealed partial class WebSocketConnection
   }
 
   // Called under LinkGate. The handlers the message starts collect on link, for Handle to run afterwards.
-  void Process(Link link, ReadOnlySpan<byte> message)
+  void Process(Link link, ReadOnlyMemory<byte> message)
   {
     Processing = link;
+    Message = message;
     try
     {
-      ProcessFrames(message);
+      ProcessFrames(message.Span);
     }
     finally
     {
       Processing = null;
+      Message = default;
     }
+  }
+
+  // A payload of the message Process is handling, as memory: some formats read from memory rather than a span. Valid
+  // as long as the message is.
+  internal ReadOnlyMemory<byte> PayloadOf(ReadOnlySpan<byte> payload)
+  {
+    if (payload.IsEmpty)
+      return default;
+    if (!Message.Span.Overlaps(payload, out var offset))
+      throw new InvalidOperationException("The payload is not part of the message being processed.");
+
+    return Message.Slice(offset, payload.Length);
   }
 
   void ProcessFrames(ReadOnlySpan<byte> message)

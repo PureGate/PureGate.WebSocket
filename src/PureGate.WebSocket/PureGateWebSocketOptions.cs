@@ -13,6 +13,10 @@ public sealed class PureGateWebSocketOptions
   // source-generated context to TypeInfoResolverChain.
   public JsonSerializerOptions SerializerOptions { get; set; } = new(JsonSerializerDefaults.Web);
 
+  // Payload formats besides JSON that a browser may ask for, such as MessagePack (see IPayloadFormat). JSON is always
+  // there, for browsers that ask for none.
+  public IList<IPayloadFormat> PayloadFormats { get; set; } = [];
+
   // The largest message accepted from a client, in bytes, at least 16 KiB. Larger data belongs in a stream.
   public int MaxMessageBytes { get; set; } = 64 * 1024;
 
@@ -102,6 +106,7 @@ public sealed class PureGateWebSocketOptions
   internal PureGateWebSocketOptions Clone() => new()
   {
     SerializerOptions = new JsonSerializerOptions(SerializerOptions),
+    PayloadFormats = [.. PayloadFormats],
     MaxMessageBytes = MaxMessageBytes,
     MaxConcurrentCalls = MaxConcurrentCalls,
     EventWindow = EventWindow,
@@ -130,9 +135,13 @@ public sealed class PureGateWebSocketOptions
     ContractMismatch = ContractMismatch,
   };
 
+  static bool IsFormatName(string name) =>
+    name is { Length: > 0 and <= 32 } && name.AsSpan().IndexOfAnyExcept("abcdefghijklmnopqrstuvwxyz0123456789-.") < 0;
+
   internal void Validate()
   {
     ArgumentNullException.ThrowIfNull(SerializerOptions, nameof(SerializerOptions));
+    ArgumentNullException.ThrowIfNull(PayloadFormats, nameof(PayloadFormats));
     ArgumentNullException.ThrowIfNull(AllowedOrigins, nameof(AllowedOrigins));
     ArgumentNullException.ThrowIfNull(UserId, nameof(UserId));
     ArgumentNullException.ThrowIfNull(Contract, nameof(Contract));
@@ -151,6 +160,16 @@ public sealed class PureGateWebSocketOptions
       ArgumentOutOfRangeException.ThrowIfLessThan(ReplayBufferBytes, MaxMessageBytes, nameof(ReplayBufferBytes));
     if (InvokeTimeout != Timeout.InfiniteTimeSpan)
       ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(InvokeTimeout, TimeSpan.Zero, nameof(InvokeTimeout));
+
+    var names = new HashSet<string>(StringComparer.Ordinal) { "json" };
+    foreach (var format in PayloadFormats)
+    {
+      ArgumentNullException.ThrowIfNull(format, nameof(PayloadFormats));
+      if (!IsFormatName(format.Name))
+        throw new ArgumentException($"'{format.Name}' is not a payload format name: 1 to 32 lowercase letters, digits, '-' and '.'.", nameof(PayloadFormats));
+      if (!names.Add(format.Name))
+        throw new ArgumentException($"The payload format '{format.Name}' is there twice, or is JSON's own.", nameof(PayloadFormats));
+    }
   }
 }
 

@@ -59,7 +59,7 @@ Kinds 0 and 17–255 are reserved. Receiving a reserved kind, or a kind from the
 
 | Bit | Name | Meaning | Valid on |
 |---|---|---|---|
-| 0 | Binary | The payload is raw bytes, not JSON. | Request, Response, Event, StreamOpen, StreamItem, StreamEnd |
+| 0 | Binary | The payload is raw bytes, not a value in the connection's format. | Request, Response, Event, StreamOpen, StreamItem, StreamEnd |
 | 1 | HasTimeout | A `timeout:varint` field follows the name: the milliseconds the caller still waits, measured when the frame is sent. | Request |
 | 2 | HasError | An `error` field follows the id. The exchange failed. | Response, StreamEnd |
 | 3 | HasTrace | A `trace:str` field follows: a W3C `traceparent`, 1–256 bytes of printable ASCII (0x21–0x7E). | Request, Event, StreamOpen |
@@ -72,9 +72,9 @@ A set flag that is reserved, or not valid on the frame's kind, is a protocol err
 
 The payload is whatever is left of the frame after its fields; it has no length of its own.
 
-- Binary flag clear: a UTF-8 JSON value without a byte order mark. An empty payload means no value (`void` in C#, `undefined` in TypeScript), which is different from the JSON `null`.
-- Binary flag set: raw bytes. An empty payload is a zero-length byte array.
-- On a failed Response or StreamEnd, the payload carries optional error details as JSON, or nothing.
+- Binary flag clear: a value in the connection's format. That is a UTF-8 JSON value without a byte order mark, unless Hello asked for another format by name and Welcome confirmed it. An empty payload means no value (`void` in C#, `undefined` in TypeScript), which is different from the JSON `null`, and a format never writes a value as nothing.
+- Binary flag set: raw bytes, in every format. An empty payload is a zero-length byte array.
+- On a failed Response or StreamEnd, the payload carries optional error details as JSON, whatever the connection's format, or nothing.
 - Kinds whose layout has no payload (Credit, Cancel, Ack, Ping, Pong, GoAway) end at their last field. Bytes after it are a protocol error.
 
 ### Ids
@@ -149,6 +149,7 @@ A Hello that fails closes the connection with the matching close code (see [Clos
 |---|---|---|
 | `token` | string, optional | A credential for the server's token authenticator, for apps that cannot use cookies. |
 | `contract` | string, optional | The client's contract hash (see the server plan). |
+| `format` | string, optional | The payload format the client writes and reads, by the server's name for it. Absent means JSON. A name the server doesn't have closes the connection with 4007. |
 | `resume` | `{ session: string, received: number }`, optional | Resume this session. `received` is the number of sequenced frames the client has processed. |
 | `calls` | number | How many server → client Requests the client accepts at once. At least 1. |
 | `maxMessage` | number | The largest message the client accepts, in bytes. At least 16,384. |
@@ -168,6 +169,7 @@ A Hello that fails closes the connection with the matching close code (see [Clos
 | `heartbeat` | number | Milliseconds (see [Liveness](#liveness)). |
 | `resumeWindow` | number | Milliseconds a dropped session stays resumable. 0 means resume is off. |
 | `contract` | `"current"` or `"stale"`, optional | Present when Hello carried a contract hash and the server checks them: whether it matches the server's. |
+| `format` | string, optional | The format Hello asked for. Absent means JSON. A client that finds another format here than the one it asked for, or none, closes with 4000: the two sides would read each other's payloads wrongly. |
 | `expires` | number, optional | Milliseconds until the connection's authentication expires (see [Re-authentication](#re-authentication)). Absent when it doesn't expire. |
 | `route` | string, optional | This server instance's routing id, for resuming behind a load balancer (see [Acknowledgement and resume](#acknowledgement-and-resume)). Not a secret. |
 
@@ -217,7 +219,7 @@ Every window is a promise the receiver makes and the sender keeps. Going past on
 
 **Resume.** When Welcome's `resumeWindow` is above 0, both sides keep every sequenced frame they sent until it is acknowledged. After the connection drops, the client may reconnect within `resumeWindow` and send Hello with `resume`. If the session is still there and the client authenticates as the same user, the server answers with Welcome `resumed: true` and its own `received` count. Then each side resends, in order, every sequenced frame after the other side's count, and carries on. Ids, name tables, windows, credits and outstanding exchanges carry over unchanged.
 
-If the session expired, or a frame needed for the replay was already discarded, the server answers with `resumed: false` and a new session. The client then fails its outstanding exchanges with `connection_closed`, and the server ends the old session.
+If the session expired, Hello asks for another format than the session's, or a frame needed for the replay was already discarded, the server answers with `resumed: false` and a new session. The client then fails its outstanding exchanges with `connection_closed`, and the server ends the old session.
 
 A session has at most one connection. A resume while an older connection of the session is still open closes the old one with 4005.
 
@@ -264,6 +266,7 @@ Either side ends the connection with a WebSocket close frame. Outstanding exchan
 | 4004 | `contract_rejected`: the server refuses stale contracts. | no |
 | 4005 | `session_replaced`: another connection resumed this session. | no |
 | 4006 | `reconnecting`, sent by the client: this connection ends, and the client will resume the session, for example while the page is in the back/forward cache or after its heartbeat failed. Browsers can only send 1000 and 3000–4999 themselves, so this stands in for 1001. | not applicable |
+| 4007 | `format_unsupported`: the server has no payload format of the name Hello asked for. | no |
 
 ## Example
 

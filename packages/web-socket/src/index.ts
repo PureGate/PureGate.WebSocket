@@ -14,6 +14,7 @@ export type {
   NoRequest,
   NoRequestStream,
   OnOf,
+  PayloadFormat,
   ReconnectOptions,
   StateChange,
   StreamOf,

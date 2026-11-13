@@ -45,6 +45,7 @@ Every name is a typed path, never a string: a typo, a wrong argument or a wrong 
 |---|---|---|
 | `contractHash` | none | From `contract.ts`. A development server warns when the browser's copy is stale. |
 | `token` | none | `() => string \| Promise<string>`, for servers that authenticate by token. Called for every connect, and to refresh before the authentication expires. |
+| `format` | JSON | A payload format the server also has, such as MessagePack: `{ name, encode, decode }`. See [payload formats](https://github.com/PureGate/PureGate.WebSocket/blob/main/src/PureGate.WebSocket/README.md#payload-formats). |
 | `timeout` | 30 s | A call's default deadline, which the server gets too. |
 | `streamBuffer` | 16 | Items a stream may have waiting in the browser. |
 | `reconnect` | `{ delays: [0, 1000, 2000, 5000, 10000, 30000], jitter: 0.2 }` | The last delay repeats; `false` closes for good instead. |

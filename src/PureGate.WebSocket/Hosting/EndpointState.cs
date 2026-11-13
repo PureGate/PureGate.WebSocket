@@ -41,6 +41,7 @@ sealed class EndpointState
     options.Validate();
     UseResolver(options.SerializerOptions);
     options.SerializerOptions.MakeReadOnly();
+    Formats = [.. options.PayloadFormats];
 
     Route = route;
     Options = options;
@@ -55,6 +56,27 @@ sealed class EndpointState
   }
 
   public string Route { get; }
+
+  // The endpoint's own payload formats, fixed when it is mapped: a connection's format is 0 for JSON, or 1 more than
+  // its place here, and the codecs of every operation, event and call to the browser follow that order.
+  public IPayloadFormat[] Formats { get; }
+
+  // The format a Hello asks for: 0 for JSON, when it asks for none; -1 when the endpoint has no format of that name.
+  public int FormatIndex(string name)
+  {
+    if (name is null)
+      return 0;
+
+    for (var i = 0; i < Formats.Length; i++)
+    {
+      if (string.Equals(Formats[i].Name, name, StringComparison.Ordinal))
+        return i + 1;
+    }
+
+    return -1;
+  }
+
+  public Serialization.PayloadCodec<T>[] Codecs<T>() => Serialization.PayloadCodecs.CreateSet<T>(Options.SerializerOptions, Formats);
 
   // Built the first time it is needed. Building it freezes the mapping, like the first connection does.
   public WebSocketContract Contract => LazyContract.Value;
@@ -104,7 +126,7 @@ sealed class EndpointState
 
   public void AddEvent<T>(ServerEvent<T> descriptor)
   {
-    var info = new ServerEventInfo<T>(descriptor, Serialization.PayloadCodecs.Create<T>(Options.SerializerOptions));
+    var info = new ServerEventInfo<T>(descriptor, Codecs<T>());
     lock (Gate)
     {
       EnsureNotStarted();
@@ -117,8 +139,8 @@ sealed class EndpointState
   {
     var info = new ClientRequestInfo<TRequest, TResponse>(
       descriptor,
-      Serialization.PayloadCodecs.Create<TRequest>(Options.SerializerOptions),
-      Serialization.PayloadCodecs.Create<TResponse>(Options.SerializerOptions));
+      Codecs<TRequest>(),
+      Codecs<TResponse>());
     lock (Gate)
     {
       EnsureNotStarted();

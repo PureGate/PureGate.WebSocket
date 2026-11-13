@@ -27,7 +27,7 @@ import { Download, type Exchange, isSource, type StreamQueue, Upload } from "./s
 const defaultDelays: readonly number[] = [0, 1_000, 2_000, 5_000, 10_000, 30_000];
 
 // Close codes after which the client does not reconnect (docs/PROTOCOL.md, Closing).
-const finalCodes = new Set([1000, 1003, 1009, 4000, 4004, 4005]);
+const finalCodes = new Set([1000, 1003, 1009, 4000, 4004, 4005, 4007]);
 const unauthorizedCode = 4001;
 
 /**
@@ -116,6 +116,7 @@ class ConnectionCore {
       goAway: (session) => this.#goAway(session),
     };
     this.#streamQueue = {
+      format: options.format,
       open: (stream) => this.#openStream(stream),
       dequeue: (stream) => removeFrom(this.#streamsWaiting, stream),
     };
@@ -351,7 +352,7 @@ class ConnectionCore {
 
     let payload: Payload;
     try {
-      payload = encodePayload(request);
+      payload = encodePayload(request, this.#options.format);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -419,7 +420,7 @@ class ConnectionCore {
     const buffer = options?.buffer ?? this.#options.streamBuffer ?? 16;
     if (!(Number.isInteger(buffer) && buffer >= 1))
       throw new RangeError("A stream's buffer is a whole number, at least 1.");
-    return new Download(this.#streamQueue, name, encodePayload(request), buffer, options?.signal);
+    return new Download(this.#streamQueue, name, encodePayload(request, this.#options.format), buffer, options?.signal);
   }
 
   // put(request, source, options?) or put(source, options?): a second argument that is a source makes the first one
@@ -434,7 +435,7 @@ class ConnectionCore {
 
     let payload: Payload;
     try {
-      payload = encodePayload(hasRequest ? args[0] : undefined);
+      payload = encodePayload(hasRequest ? args[0] : undefined, this.#options.format);
     } catch (error) {
       return Promise.reject(error);
     }
@@ -486,7 +487,7 @@ class ConnectionCore {
   #emit(name: string, event: unknown): void {
     if (this.#state === "closed") throw connectionClosed();
 
-    const payload = encodePayload(event);
+    const payload = encodePayload(event, this.#options.format);
     if (
       this.#eventQueue.length === 0 &&
       this.#session.canSendEvent() &&

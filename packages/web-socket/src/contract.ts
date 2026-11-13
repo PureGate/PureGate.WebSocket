@@ -148,6 +148,20 @@ export interface StateChange {
   readonly reason?: string;
 }
 
+/**
+ * A payload format besides JSON, such as MessagePack, that the server has under the same name (its PayloadFormats).
+ * It must decode values to the shapes their JSON has, which contract.ts describes. Uint8Array payloads travel as raw
+ * bytes in every format, and error details stay JSON.
+ */
+export interface PayloadFormat {
+  /** The server's name for it: 1 to 32 lowercase letters, digits, "-" and ".". */
+  readonly name: string;
+  /** Writes a value, in at least one byte. */
+  encode(value: unknown): Uint8Array;
+  /** Reads a value. The bytes are a view into the received message, which is never reused. */
+  decode(bytes: Uint8Array): unknown;
+}
+
 /** How the connection comes back after a drop. */
 export interface ReconnectOptions {
   /** Milliseconds before each attempt; the last one repeats. [0, 1000, 2000, 5000, 10000, 30000]. */
@@ -197,6 +211,8 @@ export interface ConnectOptions {
   readonly contractHash?: string;
   /** A credential for servers that authenticate by token, called for every connect and reconnect. */
   readonly token?: () => string | Promise<string>;
+  /** The payload format, which the server must have; JSON by default. */
+  readonly format?: PayloadFormat;
   /** Default milliseconds a call waits. 30,000. */
   readonly timeout?: number;
   /** Items a stream may have waiting in the browser before the server must stop. 16. */

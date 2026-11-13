@@ -79,7 +79,7 @@ sealed class UploadState<TItem>(uint id, WebSocketCall call, PayloadCodec<TItem>
     TItem value;
     try
     {
-      value = codec.Read(item.Payload, item.Has(FrameFlags.Binary));
+      value = codec.Read(connection.PayloadOf(item.Payload), item.Has(FrameFlags.Binary));
     }
     catch (InvalidPayloadException exception)
     {

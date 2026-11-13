@@ -48,7 +48,7 @@ public sealed partial class WebSocketConnection
       }
     }
 
-    var pending = new PendingInvoke<TResponse>(info.Response);
+    var pending = new PendingInvoke<TResponse>(info.Response[Format]);
     uint id;
     lock (InvokesGate)
     {
@@ -113,11 +113,12 @@ public sealed partial class WebSocketConnection
     var buffer = PooledBuffer.Scratch();
     try
     {
-      info.Request.Write(buffer, payload);
+      var codec = info.Request[Format];
+      codec.Write(buffer, payload);
       scoped var frame = new Frame
       {
         Kind = FrameKind.Request,
-        Flags = info.Request.IsBinary ? FrameFlags.Binary : FrameFlags.None,
+        Flags = codec.IsBinary ? FrameFlags.Binary : FrameFlags.None,
         Id = id,
         Payload = buffer.WrittenSpan,
       };
@@ -156,7 +157,7 @@ public sealed partial class WebSocketConnection
     }
 
     ClientCallSlots.Release();
-    pending.Complete(in frame);
+    pending.Complete(in frame, PayloadOf(frame.Payload));
     CheckDrained();
   }
 

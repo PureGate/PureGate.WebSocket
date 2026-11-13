@@ -29,7 +29,7 @@ public abstract class WebSocketBuilder
       Func<TRequest, WebSocketCall, CancellationToken, ValueTask<TResponse>> handler)
   {
     ArgumentNullException.ThrowIfNull(handler);
-    return Add(new RequestOperation<TRequest, TResponse>(FullName(name), Codec<TRequest>(), Codec<TResponse>(), handler));
+    return Add(new RequestOperation<TRequest, TResponse>(FullName(name), Codecs<TRequest>(), Codecs<TResponse>(), handler));
   }
 
   // An operation without a request, such as "orders.latest".
@@ -40,8 +40,8 @@ public abstract class WebSocketBuilder
     ArgumentNullException.ThrowIfNull(handler);
     return Add(new RequestOperation<NoPayload, TResponse>(
       FullName(name),
-      Codec<NoPayload>(),
-      Codec<TResponse>(),
+      Codecs<NoPayload>(),
+      Codecs<TResponse>(),
       (_, call, cancellationToken) => handler(call, cancellationToken)));
   }
 
@@ -53,8 +53,8 @@ public abstract class WebSocketBuilder
     ArgumentNullException.ThrowIfNull(handler);
     return Add(new RequestOperation<TRequest, NoPayload>(
       FullName(name),
-      Codec<TRequest>(),
-      Codec<NoPayload>(),
+      Codecs<TRequest>(),
+      Codecs<NoPayload>(),
       async (request, call, cancellationToken) =>
       {
         await handler(request, call, cancellationToken);
@@ -68,8 +68,8 @@ public abstract class WebSocketBuilder
     ArgumentNullException.ThrowIfNull(handler);
     return Add(new RequestOperation<NoPayload, NoPayload>(
       FullName(name),
-      Codec<NoPayload>(),
-      Codec<NoPayload>(),
+      Codecs<NoPayload>(),
+      Codecs<NoPayload>(),
       async (_, call, cancellationToken) =>
       {
         await handler(call, cancellationToken);
@@ -84,7 +84,7 @@ public abstract class WebSocketBuilder
       Func<TRequest, WebSocketCall, CancellationToken, IAsyncEnumerable<TItem>> handler)
   {
     ArgumentNullException.ThrowIfNull(handler);
-    return Add(new StreamOperation<TRequest, TItem>(FullName(name), Codec<TRequest>(), Codec<TItem>(), handler));
+    return Add(new StreamOperation<TRequest, TItem>(FullName(name), Codecs<TRequest>(), Codecs<TItem>(), handler));
   }
 
   // A stream without a request, such as "prices.all".
@@ -95,8 +95,8 @@ public abstract class WebSocketBuilder
     ArgumentNullException.ThrowIfNull(handler);
     return Add(new StreamOperation<NoPayload, TItem>(
       FullName(name),
-      Codec<NoPayload>(),
-      Codec<TItem>(),
+      Codecs<NoPayload>(),
+      Codecs<TItem>(),
       (_, call, cancellationToken) => handler(call, cancellationToken)));
   }
 
@@ -109,9 +109,9 @@ public abstract class WebSocketBuilder
     ArgumentNullException.ThrowIfNull(handler);
     return Add(new UploadOperation<TRequest, TItem, TResponse>(
       FullName(name),
-      Codec<TRequest>(),
-      Codec<TItem>(),
-      Codec<TResponse>(),
+      Codecs<TRequest>(),
+      Codecs<TItem>(),
+      Codecs<TResponse>(),
       handler));
   }
 
@@ -123,9 +123,9 @@ public abstract class WebSocketBuilder
     ArgumentNullException.ThrowIfNull(handler);
     return Add(new UploadOperation<NoPayload, TItem, TResponse>(
       FullName(name),
-      Codec<NoPayload>(),
-      Codec<TItem>(),
-      Codec<TResponse>(),
+      Codecs<NoPayload>(),
+      Codecs<TItem>(),
+      Codecs<TResponse>(),
       (_, items, call, cancellationToken) => handler(items, call, cancellationToken)));
   }
 
@@ -137,9 +137,9 @@ public abstract class WebSocketBuilder
     ArgumentNullException.ThrowIfNull(handler);
     return Add(new UploadOperation<TRequest, TItem, NoPayload>(
       FullName(name),
-      Codec<TRequest>(),
-      Codec<TItem>(),
-      Codec<NoPayload>(),
+      Codecs<TRequest>(),
+      Codecs<TItem>(),
+      Codecs<NoPayload>(),
       async (request, items, call, cancellationToken) =>
       {
         await handler(request, items, call, cancellationToken);
@@ -155,9 +155,9 @@ public abstract class WebSocketBuilder
     ArgumentNullException.ThrowIfNull(handler);
     return Add(new UploadOperation<NoPayload, TItem, NoPayload>(
       FullName(name),
-      Codec<NoPayload>(),
-      Codec<TItem>(),
-      Codec<NoPayload>(),
+      Codecs<NoPayload>(),
+      Codecs<TItem>(),
+      Codecs<NoPayload>(),
       async (_, items, call, cancellationToken) =>
       {
         await handler(items, call, cancellationToken);
@@ -169,10 +169,10 @@ public abstract class WebSocketBuilder
   public OperationBuilder MapClientEvent<T>(string name, Func<T, WebSocketCall, CancellationToken, ValueTask> handler)
   {
     ArgumentNullException.ThrowIfNull(handler);
-    return Add(new ClientEventOperation<T>(FullName(name), Codec<T>(), handler));
+    return Add(new ClientEventOperation<T>(FullName(name), Codecs<T>(), handler));
   }
 
-  PayloadCodec<T> Codec<T>() => PayloadCodecs.Create<T>(Endpoint.Options.SerializerOptions);
+  PayloadCodec<T>[] Codecs<T>() => Endpoint.Codecs<T>();
 
   OperationBuilder Add(Operation operation)
   {

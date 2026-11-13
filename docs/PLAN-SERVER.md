@@ -98,11 +98,12 @@ Handlers are plain `Func`s, so the `MapRequest` overloads tell themselves apart 
 
 | Type | Members |
 |---|---|
-| `WebSocketCall` | `Connection`, `User`, `Name`, `TraceParent`, and `Services`, a DI scope created only if the handler touches it. Like `HttpContext`, it is pooled and valid only until the handler finishes. |
+| `WebSocketCall` | `Connection`, `User`, `Name`, `TraceParent`, and `Services`, a DI scope created only if the handler touches it. Like `HttpContext`, it is valid only until the handler finishes. |
 | `WebSocketConnection` | `Id`, `User`, `Items`, `Groups` (`Add`, `Remove`, `Contains`), `SendAsync(ServerEvent<T>, T)`, `InvokeAsync(ClientRequest<TRequest, TResponse>, TRequest, ct, timeout?)`, `CloseAsync(code?)`, and `Closed`, a token that fires when the session ends. `HttpContext` is the current transport's, which changes after a resume. |
 | `IWebSocketHub` | `All`, `User(id)`, `Group(name)`, `Connection(id)`, each a `WebSocketTarget` with `SendAsync(ServerEvent<T>, T)` and `Except(connection)`. It covers every endpoint in the app; a connection only receives the events its endpoint maps. |
 | `ServerEvent<T>`, `ClientRequest<TRequest, TResponse>` | Descriptors: a name and types, created once, usually as static fields. Sending an event that no endpoint maps throws. |
 | `CallException(code, message, details?)` | Fails a call with an application error code and optional JSON details. |
+| `IPayloadFormat` | `Name`, `Write<T>` and `Read<T>`: a payload format besides JSON, such as MessagePack, over any library. |
 
 How a handler's outcome reaches the caller:
 
@@ -123,6 +124,7 @@ Defaults are sized for untrusted clients on the public internet.
 | Option | Default | Notes |
 |---|---|---|
 | `SerializerOptions` | `JsonSerializerDefaults.Web` | camelCase, which matches TypeScript. For AOT, add a source-generated context. |
+| `PayloadFormats` | none | Formats besides JSON that a browser may ask for in Hello, each an `IPayloadFormat`. |
 | `MaxMessageBytes` | 64 KiB | The largest message accepted from a client. Larger data goes through streams. |
 | `MaxConcurrentCalls` | 32 | Welcome's `calls`. SignalR runs one call at a time per client by default. |
 | `MaxStreams` | 8 | Welcome's `streams`, downloads and uploads together. |

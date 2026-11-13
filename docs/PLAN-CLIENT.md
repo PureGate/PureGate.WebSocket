@@ -92,6 +92,7 @@ Returns a `Connection<C>` at once and starts connecting. A relative URL resolves
 |---|---|---|
 | `contractHash` | none | Sent in Hello, so a development server can say the contract is stale. |
 | `token` | none | `() => string \| Promise<string>`, called for every connect and reconnect, and to refresh before the authentication expires. For apps that can't use cookies. |
+| `format` | JSON | A payload format the server also has, such as MessagePack: `{ name, encode, decode }`. |
 | `timeout` | 30 s | Default deadline for calls. |
 | `streamBuffer` | 16 | Items a stream may have waiting before the server must stop. |
 | `reconnect` | delays `[0, 1_000, 2_000, 5_000, 10_000, 30_000]` ms, jitter 20% | The last delay repeats. `false` turns reconnecting off. |

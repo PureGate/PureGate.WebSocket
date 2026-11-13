@@ -44,6 +44,7 @@ public static class TestApi
   public static void Configure(PureGateWebSocketOptions options)
   {
     options.SerializerOptions.TypeInfoResolverChain.Insert(0, TestJson.Default);
+    options.PayloadFormats.Add(new MarkedJsonFormat());
 
     // The browser tests' page comes from Vite's server, a different origin.
     options.AllowedOrigins = ["*"];

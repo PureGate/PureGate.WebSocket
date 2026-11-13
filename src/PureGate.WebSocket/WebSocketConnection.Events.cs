@@ -24,8 +24,9 @@ public sealed partial class WebSocketConnection
     var buffer = PooledBuffer.Scratch();
     try
     {
-      info.Codec.Write(buffer, payload);
-      WriteEvent(serverEvent.Name, serverEvent.NameUtf8, info.Codec.IsBinary, buffer.WrittenSpan);
+      var codec = info.Codecs[Format];
+      codec.Write(buffer, payload);
+      WriteEvent(serverEvent.Name, serverEvent.NameUtf8, codec.IsBinary, buffer.WrittenSpan);
     }
     finally
     {

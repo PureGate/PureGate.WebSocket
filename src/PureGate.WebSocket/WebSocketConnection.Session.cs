@@ -46,7 +46,8 @@ public sealed partial class WebSocketConnection
     {
       if (IsEnded || !Started || !string.Equals(userId, UserId, StringComparison.Ordinal))
         return IsEnded ? ResumeOutcome.Unavailable : ResumeOutcome.Refused;
-      if (Draining || !Outbox.CanResumeFrom(hello.Resume.Received))
+      // What the session sent waits for the browser in the session's format.
+      if (Draining || !Outbox.CanResumeFrom(hello.Resume.Received) || Endpoint.FormatIndex(hello.Format) != Format)
         return ResumeOutcome.Unavailable;
 
       old = CurrentLink;

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using PureGate.WebSocket.Serialization;
 using PureGate.WebSocket.Transport;
 
 namespace PureGate.WebSocket.Hosting;
@@ -128,12 +129,16 @@ sealed class WebSocketHub : IWebSocketHub
     }
   }
 
-  // One event on its way to the connections of a target, serialized for the endpoint of the last connection.
+  // One event on its way to the connections of a target. Its payload is serialized for the endpoint of the last
+  // connection, once for each format a connection there uses.
   struct Delivery<T>(ServerEvent<T> descriptor, T payload, WebSocketConnection except, bool dispatch) : IDisposable
   {
     EndpointState SerializedFor;
     ServerEventInfo<T> Info;
-    PooledBuffer Buffer;
+
+    // By format. JSON's is apart, so an endpoint without other formats needs no array.
+    PooledBuffer Json;
+    PooledBuffer[] Others;
 
     public void To(WebSocketConnection connection)
     {
@@ -146,17 +151,42 @@ sealed class WebSocketHub : IWebSocketHub
         if (!connection.Endpoint.TryGetEvent(descriptor, out var found))
           return;
 
+        Dispose();
         Info = found;
-        Buffer?.Return();
-        Buffer = new PooledBuffer(256);
-        Info.Codec.Write(Buffer, payload);
         SerializedFor = connection.Endpoint;
       }
 
-      connection.WriteEvent(Info.Descriptor.Name, Info.Descriptor.NameUtf8, Info.Codec.IsBinary, Buffer.WrittenSpan, dispatch);
+      var format = connection.Format;
+      var codec = Info.Codecs[format];
+      connection.WriteEvent(Info.Descriptor.Name, Info.Descriptor.NameUtf8, codec.IsBinary, Serialized(format, codec).WrittenSpan, dispatch);
     }
 
-    public void Dispose() => Buffer?.Return();
+    PooledBuffer Serialized(int format, PayloadCodec<T> codec)
+    {
+      if (format > 0)
+        Others ??= new PooledBuffer[Info.Codecs.Length];
+
+      ref var buffer = ref format == 0 ? ref Json : ref Others[format];
+      if (buffer is null)
+      {
+        buffer = new PooledBuffer(256);
+        codec.Write(buffer, payload);
+      }
+
+      return buffer;
+    }
+
+    public void Dispose()
+    {
+      Json?.Return();
+      Json = null;
+      if (Others is null)
+        return;
+
+      foreach (var buffer in Others)
+        buffer?.Return();
+      Others = null;
+    }
   }
 
   static void Join(

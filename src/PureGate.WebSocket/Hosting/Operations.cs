@@ -70,14 +70,15 @@ abstract class Operation(string name, OperationKind kind)
 
 sealed class RequestOperation<TRequest, TResponse>(
     string name,
-    PayloadCodec<TRequest> request,
-    PayloadCodec<TResponse> response,
+    PayloadCodec<TRequest>[] request,
+    PayloadCodec<TResponse>[] response,
     Func<TRequest, WebSocketCall, CancellationToken, ValueTask<TResponse>> handler)
   : Operation(name, OperationKind.Request)
 {
-  public PayloadCodec<TRequest> Request { get; } = request;
+  // By the connection's format (EndpointState.Formats).
+  public PayloadCodec<TRequest>[] Request { get; } = request;
 
-  public PayloadCodec<TResponse> Response { get; } = response;
+  public PayloadCodec<TResponse>[] Response { get; } = response;
 
   public override Type RequestType => typeof(TRequest);
 
@@ -88,7 +89,7 @@ sealed class RequestOperation<TRequest, TResponse>(
     TRequest value;
     try
     {
-      value = Request.Read(frame.Payload, frame.Has(FrameFlags.Binary));
+      value = Request[connection.Format].Read(connection.PayloadOf(frame.Payload), frame.Has(FrameFlags.Binary));
     }
     catch (InvalidPayloadException exception)
     {
@@ -122,7 +123,7 @@ sealed class RequestOperation<TRequest, TResponse>(
         return;
       }
 
-      await connection.CompleteCallAsync(call, operation.Response, result);
+      await connection.CompleteCallAsync(call, operation.Response[connection.Format], result);
     }
 
     // Apart, so the closure its result needs is created only for operations with a pipeline.
@@ -139,11 +140,11 @@ sealed class RequestOperation<TRequest, TResponse>(
 
 sealed class ClientEventOperation<T>(
     string name,
-    PayloadCodec<T> codec,
+    PayloadCodec<T>[] codecs,
     Func<T, WebSocketCall, CancellationToken, ValueTask> handler)
   : Operation(name, OperationKind.ClientEvent)
 {
-  public PayloadCodec<T> Codec { get; } = codec;
+  public PayloadCodec<T>[] Codecs { get; } = codecs;
 
   public override Type RequestType => typeof(T);
 
@@ -154,7 +155,7 @@ sealed class ClientEventOperation<T>(
     T value;
     try
     {
-      value = Codec.Read(frame.Payload, frame.Has(FrameFlags.Binary));
+      value = Codecs[connection.Format].Read(connection.PayloadOf(frame.Payload), frame.Has(FrameFlags.Binary));
     }
     catch (InvalidPayloadException exception)
     {
@@ -207,12 +208,12 @@ sealed class ClientEventOperation<T>(
 // credit: each item waits for credit before the enumerator moves to it.
 sealed class StreamOperation<TRequest, TItem>(
     string name,
-    PayloadCodec<TRequest> request,
-    PayloadCodec<TItem> item,
+    PayloadCodec<TRequest>[] request,
+    PayloadCodec<TItem>[] item,
     Func<TRequest, WebSocketCall, CancellationToken, IAsyncEnumerable<TItem>> handler)
   : Operation(name, OperationKind.Stream)
 {
-  public PayloadCodec<TItem> Item { get; } = item;
+  public PayloadCodec<TItem>[] Item { get; } = item;
 
   Func<TRequest, WebSocketCall, CancellationToken, IAsyncEnumerable<TItem>> Handler { get; } = handler;
 
@@ -226,7 +227,7 @@ sealed class StreamOperation<TRequest, TItem>(
     TRequest value;
     try
     {
-      value = request.Read(frame.Payload, frame.Has(FrameFlags.Binary));
+      value = request[connection.Format].Read(connection.PayloadOf(frame.Payload), frame.Has(FrameFlags.Binary));
     }
     catch (InvalidPayloadException exception)
     {
@@ -268,6 +269,7 @@ sealed class StreamOperation<TRequest, TItem>(
     async ValueTask ProduceAsync()
     {
       var token = stream.Call.CancellationToken;
+      var codec = operation.Item[connection.Format];
       await using var items = operation.Handler(value, stream.Call, token).GetAsyncEnumerator(token);
       while (true)
       {
@@ -275,7 +277,7 @@ sealed class StreamOperation<TRequest, TItem>(
         if (!await items.MoveNextAsync())
           break;
 
-        if (!connection.WriteStreamItem(stream, operation.Item, items.Current))
+        if (!connection.WriteStreamItem(stream, codec, items.Current))
           break;
       }
     }
@@ -285,13 +287,13 @@ sealed class StreamOperation<TRequest, TItem>(
 // A stream the browser sends, read by a handler that returns one result.
 sealed class UploadOperation<TRequest, TItem, TResponse>(
     string name,
-    PayloadCodec<TRequest> request,
-    PayloadCodec<TItem> item,
-    PayloadCodec<TResponse> response,
+    PayloadCodec<TRequest>[] request,
+    PayloadCodec<TItem>[] item,
+    PayloadCodec<TResponse>[] response,
     Func<TRequest, IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask<TResponse>> handler)
   : Operation(name, OperationKind.Upload), IUploadOperation
 {
-  public PayloadCodec<TResponse> Response { get; } = response;
+  public PayloadCodec<TResponse>[] Response { get; } = response;
 
   Func<TRequest, IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask<TResponse>> Handler { get; } = handler;
 
@@ -306,7 +308,7 @@ sealed class UploadOperation<TRequest, TItem, TResponse>(
     TRequest value;
     try
     {
-      value = request.Read(frame.Payload, frame.Has(FrameFlags.Binary));
+      value = request[connection.Format].Read(connection.PayloadOf(frame.Payload), frame.Has(FrameFlags.Binary));
     }
     catch (InvalidPayloadException exception)
     {
@@ -314,7 +316,7 @@ sealed class UploadOperation<TRequest, TItem, TResponse>(
       return;
     }
 
-    var upload = connection.BeginUpload(this, in frame, item);
+    var upload = connection.BeginUpload(this, in frame, item[connection.Format]);
     connection.RunHandler(new Run(this, connection, upload, value));
   }
 
@@ -340,7 +342,7 @@ sealed class UploadOperation<TRequest, TItem, TResponse>(
         return;
       }
 
-      await connection.CompleteUploadAsync(upload, operation.Response, result);
+      await connection.CompleteUploadAsync(upload, operation.Response[connection.Format], result);
     }
 
     // Apart, so the closure its result needs is created only for uploads with a pipeline.
@@ -390,11 +392,12 @@ interface IOutgoingMember
 }
 
 // The browser-facing side of a ServerEvent: its name and how its payload is written.
-sealed class ServerEventInfo<T>(ServerEvent<T> descriptor, PayloadCodec<T> codec) : IOutgoingMember
+sealed class ServerEventInfo<T>(ServerEvent<T> descriptor, PayloadCodec<T>[] codecs) : IOutgoingMember
 {
   public ServerEvent<T> Descriptor { get; } = descriptor;
 
-  public PayloadCodec<T> Codec { get; } = codec;
+  // By the connection's format.
+  public PayloadCodec<T>[] Codecs { get; } = codecs;
 
   public string Name => Descriptor.Name;
 
@@ -406,14 +409,15 @@ sealed class ServerEventInfo<T>(ServerEvent<T> descriptor, PayloadCodec<T> codec
 // The browser-facing side of a ClientRequest: its name and how its payloads are read and written.
 sealed class ClientRequestInfo<TRequest, TResponse>(
     ClientRequest<TRequest, TResponse> descriptor,
-    PayloadCodec<TRequest> request,
-    PayloadCodec<TResponse> response) : IOutgoingMember
+    PayloadCodec<TRequest>[] request,
+    PayloadCodec<TResponse>[] response) : IOutgoingMember
 {
   public ClientRequest<TRequest, TResponse> Descriptor { get; } = descriptor;
 
-  public PayloadCodec<TRequest> Request { get; } = request;
+  // By the connection's format.
+  public PayloadCodec<TRequest>[] Request { get; } = request;
 
-  public PayloadCodec<TResponse> Response { get; } = response;
+  public PayloadCodec<TResponse>[] Response { get; } = response;
 
   public string Name => Descriptor.Name;
 

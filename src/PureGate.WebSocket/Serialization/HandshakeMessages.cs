@@ -9,6 +9,10 @@ sealed class HelloMessage
 {
   public string Token { get; set; }
   public string Contract { get; set; }
+
+  // The payload format the browser writes and reads, or null for JSON.
+  public string Format { get; set; }
+
   public ResumeRequest Resume { get; set; }
   public int Calls { get; set; }
   public int MaxMessage { get; set; }
@@ -33,6 +37,9 @@ sealed class WelcomeMessage
   public long Heartbeat { get; set; }
   public long ResumeWindow { get; set; }
   public string Contract { get; set; }
+
+  // The format Hello asked for, which the server has; null for JSON.
+  public string Format { get; set; }
 
   [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
   public long Expires { get; set; }
