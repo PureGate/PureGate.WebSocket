@@ -154,16 +154,16 @@ The memory one connection can hold is bounded by these limits: one message being
 
 ```
 src/PureGate.WebSocket/
-  Protocol/     VarInt, FrameReader, FrameWriter, FrameKind, FrameFlags, NameTable, ErrorCode, handshake JSON
-  Transport/    upgrade (subprotocol, origin, keep-alive, compression), receive loop, send path, replay buffer
-  Sessions/     Session (survives reconnects), SessionStore (resume lookup, expiry), windows, pending exchanges
-  Endpoints/    builders, Map* registration, operation registry, descriptors
-  Dispatch/     pooled call work items, error mapping, event ordering, stream pumping
-  Hub/          connection registry, user index, groups, broadcast
-  Contract/     schema export, TypeScript emitter, canonical hash, MapContract
-  Security/     origin policy, token authentication, authorization cache
-  Diagnostics/  Meter, ActivitySource, source-generated log messages
-  Timing/       one shared timer for every deadline
+  (root)          the public API: options, builders, event and call descriptors, the hub interface, groups,
+                  WebSocketCall, CallException, and WebSocketConnection, one session, in parts: receiving, calls,
+                  streams, events, calls to the browser, resume and shutdown, security
+  Protocol/       Varint, FrameReader, FrameWriter, FrameKind, FrameFlags, name tables, error codes
+  Serialization/  payload codecs, handshake JSON
+  Transport/      Outbox (send queue, coalescing, Acks), ReplayBuffer, PooledBuffer
+  Hosting/        EndpointState (upgrade, operation registry), operations, stream and event state, pending calls to
+                  the browser, WebSocketHub
+  Contracts/      schema export, TypeScript emitter, canonical hash
+  Diagnostics/    Meter, ActivitySource, source-generated log messages
 ```
 
 The library's root namespace is `PureGate.WebSocket`. Inside the library, the name `WebSocket` resolves to that namespace, not to `System.Net.WebSockets.WebSocket`. So library code refers to the BCL type through an alias, which keeps the collision out of public signatures.
@@ -177,10 +177,10 @@ The goal is less CPU, memory and allocation per message and per connection than 
 1. **Receiving.** `WebSocket.ReceiveAsync(Memory<byte>)` returns a `ValueTask`, so receiving allocates nothing. Each message is first waited for with a zero-byte receive, which ASP.NET Core's managed WebSocket supports: when it has to wait, the buffer goes back to the pool, so an idle connection holds none. The buffer is rented again for the message and grown to fit it.
 2. **Parsing in place.** `FrameReader` is a `ref struct` over the message bytes. Payloads are deserialized straight from the span, using a `JsonTypeInfo<T>` resolved once at mapping time. There are no per-call type lookups and no intermediate strings.
 3. **Names.** A name reference is an index into an array of resolved operations. A literal name is looked up through a frozen dictionary's span-based alternate lookup, after decoding its ASCII bytes on the stack. The table never keeps a client's text: a name without a handler resolves to one shared "unknown" entry. The protocol's 1,024 definitions per connection therefore cost at most one reference each, however long the names are.
-4. **Sending.** Frames are written with `Utf8JsonWriter` into pooled buffers. A sender writes directly when no send is in progress and queues otherwise. The sender that finishes drains the queue, coalescing queued frames into one message of up to 64 KiB. There is no send task per connection.
-5. **Broadcast.** The payload is serialized once into a reference-counted pooled buffer. Each connection writes its own small header (its name code differs) and copies the payload. A slow connection never holds up the others: its frames queue, and its slow-consumer policy applies.
+4. **Sending.** A payload is serialized with the thread's own `Utf8JsonWriter` into the thread's own scratch buffer, then copied into the connection's pooled message buffer under the outbox lock. The writer that finds no send running starts one; frames written meanwhile are coalesced into the next message, up to 64 KiB and never past the browser's limit. While the receive loop runs a message's handlers, it holds back the sends it would start, so their answers go out together. There is no send task per connection.
+5. **Broadcast.** The payload is serialized once for each endpoint the targets are on. Each connection writes its own small header (its name code differs) and copies the payload, and its send runs on the thread pool, so the connections send in parallel. A slow connection never holds up the others: its frames queue, and its slow-consumer policy applies.
 6. **Dispatch.** Handlers start on the receive loop once their message is processed, outside the link lock and in an empty execution context, as on the thread pool. One that completes synchronously costs no thread switch, and the answers to one message go out together in one message. Until its first `await`, a handler holds up its connection's next messages, as SignalR's do by default. Calls' `CancellationTokenSource`s are reused with `TryReset`, and the built-in delegates are static.
-7. **Timers.** One shared timer keeps a priority queue of deadlines: handshakes, call deadlines, heartbeats, Ack delays and session expiry. No connection or call owns a timer.
+7. **Timers.** Deadlines use the runtime's timers, which sit in its per-core timer queues, and each is made only when needed. A call's deadline is its cancellation source's timer, reused with the source. A connection takes one for the handshake, and others for an Ack it owes, its session's expiry while the browser is away, its authentication's expiry and a drain. Dead connections are found by the WebSocket keep-alive (`KeepAliveInterval`, `KeepAliveTimeout`).
 8. **DI scopes** are created only when a handler reads `call.Services`.
 9. **Native AOT.** No reflection. JSON goes through source-generated metadata, the AOT and trimming analyzers run on every build, and CI publishes the test server with `PublishAot`.
 

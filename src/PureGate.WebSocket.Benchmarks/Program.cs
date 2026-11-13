@@ -147,20 +147,23 @@ namespace PureGate.WebSocket.Benchmarks
         return values[values.Length / 2];
       });
 
+    // A Markdown table padded to its widest cells, so it also reads in a console. Each column has one format: whole
+    // numbers once it reaches 100, 3 decimals below that, so the digits line up.
     public static void Print(List<(string System, Dictionary<string, double> Metrics)> rows)
     {
       var columns = rows[0].Metrics.Keys.ToArray();
-      Console.WriteLine($"| System | {string.Join(" | ", columns)} |");
-      Console.WriteLine($"|---|{string.Concat(columns.Select(_ => "---:|"))}");
-      foreach (var (system, metrics) in rows)
-        Console.WriteLine($"| {system} | {string.Join(" | ", columns.Select(column => Format(metrics[column])))} |");
+      var decimals = columns.Select(column => rows.Max(row => double.IsNaN(row.Metrics[column]) ? 0 : row.Metrics[column]) >= 100 ? 0 : 3).ToArray();
+      var cells = rows.Select(row => columns.Select((column, i) => Format(row.Metrics[column], decimals[i])).ToArray()).ToArray();
+      var first = Math.Max("System".Length, rows.Max(row => row.System.Length));
+      var widths = columns.Select((column, i) => Math.Max(column.Length, cells.Max(row => row[i].Length))).ToArray();
+
+      Console.WriteLine($"| {"System".PadRight(first)} | {string.Join(" | ", columns.Select((column, i) => column.PadLeft(widths[i])))} |");
+      Console.WriteLine($"|{new string('-', first + 2)}|{string.Join("|", widths.Select(width => new string('-', width + 1) + ":"))}|");
+      for (var r = 0; r < rows.Count; r++)
+        Console.WriteLine($"| {rows[r].System.PadRight(first)} | {string.Join(" | ", cells[r].Select((cell, i) => cell.PadLeft(widths[i])))} |");
     }
 
-    static string Format(double value) => value switch
-    {
-      double.NaN => "-",
-      >= 100 => value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture),
-      _ => value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
-    };
+    static string Format(double value, int decimals) =>
+      double.IsNaN(value) ? "-" : value.ToString($"N{decimals}", System.Globalization.CultureInfo.InvariantCulture);
   }
 }

@@ -13,41 +13,41 @@ The server runs in its own process, so its memory, allocations and CPU are its o
 
 ### 1 KB echo, sequential, one connection
 
-| System | calls/s | p50 ms | p99 ms | server bytes/call |
-|---|---:|---:|---:|---:|
-| PureGate.WebSocket | 30,014 | 0.03 | 0.072 | 2,236 |
-| SignalR JSON | 18,087 | 0.049 | 0.124 | 2,689 |
-| SignalR MessagePack | 20,716 | 0.043 | 0.106 | 2,688 |
+| System              | calls/s | p50 ms | p99 ms | server bytes/call |
+|---------------------|--------:|-------:|-------:|------------------:|
+| PureGate.WebSocket  |  30,014 |  0.030 |  0.072 |             2,236 |
+| SignalR JSON        |  18,087 |  0.049 |  0.124 |             2,689 |
+| SignalR MessagePack |  20,716 |  0.043 |  0.106 |             2,688 |
 
 The echoed 1 KB string is 2,072 of the bytes each call allocates.
 
 ### 1 KB echo, 64 callers on one connection
 
-| System | calls/s | p50 ms | p99 ms |
-|---|---:|---:|---:|
-| PureGate.WebSocket | 551,239 | 0.106 | 0.355 |
-| SignalR JSON | 187,101 | 0.305 | 0.689 |
-| SignalR MessagePack | 340,586 | 0.177 | 0.494 |
+| System              | calls/s | p50 ms | p99 ms |
+|---------------------|--------:|-------:|-------:|
+| PureGate.WebSocket  | 551,239 |  0.106 |  0.355 |
+| SignalR JSON        | 187,101 |  0.305 |  0.689 |
+| SignalR MessagePack | 340,586 |  0.177 |  0.494 |
 
 ### 1,000 connections making steady calls
 
 Every connection calls, waits 10 ms and calls again. Windows rounds the wait up to its 15.6 ms timer tick, which caps all three at the same rate, and makes the p99 vary from run to run.
 
-| System | calls/s | p50 ms | p99 ms | server CPU % |
-|---|---:|---:|---:|---:|
-| PureGate.WebSocket | 59,537 | 1.526 | 10.815 | 7.484 |
-| SignalR JSON | 58,512 | 2.148 | 14.438 | 9.689 |
-| SignalR MessagePack | 58,847 | 1.896 | 13.348 | 8.734 |
+| System              | calls/s | p50 ms | p99 ms | server CPU % |
+|---------------------|--------:|-------:|-------:|-------------:|
+| PureGate.WebSocket  |  59,537 |  1.526 | 10.815 |        7.484 |
+| SignalR JSON        |  58,512 |  2.148 | 14.438 |        9.689 |
+| SignalR MessagePack |  58,847 |  1.896 | 13.348 |        8.734 |
 
 ### 10,000 idle connections, then one broadcast to all
 
 The server's heap per idle connection, and the time from the broadcast call until the last connection has the event.
 
-| System | server KB/connection | broadcast ms |
-|---|---:|---:|
-| PureGate.WebSocket | 15.81 | 15.223 |
-| SignalR JSON | 23.957 | 17.648 |
-| SignalR MessagePack | 23.927 | 21.047 |
+| System              | server KB/connection | broadcast ms |
+|---------------------|---------------------:|-------------:|
+| PureGate.WebSocket  |               15.810 |       15.223 |
+| SignalR JSON        |               23.957 |       17.648 |
+| SignalR MessagePack |               23.927 |       21.047 |
 
 PureGate.WebSocket also keeps the event, as it keeps everything it sends, until the browser acknowledges it, so that a session can resume without losing it.
 
@@ -65,12 +65,12 @@ dotnet run -c Release --project src/PureGate.WebSocket.Benchmarks
 
 Node runs the sources directly, without Vite's module runner, whose export getters the loops would measure too.
 
-| Path | per second |
-|---|---:|
-| Write a 1 KB Request | 11,081,852 |
-| Read one message of 16 Responses of 1 KB | 2,712,509 |
-| Decode 1 KB of JSON | 2,485,481 |
-| Encode 1 KB of JSON | 1,782,941 |
+| Path                                     | per second |
+|------------------------------------------|-----------:|
+| Write a 1 KB Request                     | 11,081,852 |
+| Read one message of 16 Responses of 1 KB |  2,712,509 |
+| Decode 1 KB of JSON                      |  2,485,481 |
+| Encode 1 KB of JSON                      |  1,782,941 |
 
 ```sh
 yarn workspace @puregate/web-socket bench
