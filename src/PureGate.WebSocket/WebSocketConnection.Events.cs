@@ -63,6 +63,10 @@ public sealed partial class WebSocketConnection
       case WriteResult.Overloaded when Options.SlowConsumer == SlowConsumerPolicy.DropEvents:
         Log.EventNotSent(Logger, Id, name);
         break;
+      case WriteResult.Written:
+        Endpoint.Telemetry.EventsSent.Add(1);
+        CheckBacklog(WriteResult.Written);
+        break;
       case var result:
         CheckBacklog(result);
         break;
@@ -80,6 +84,9 @@ public sealed partial class WebSocketConnection
       DropEvent(null, "No event handler has this name.");
       return;
     }
+
+    if (Endpoint.Telemetry.EventsReceived.Enabled)
+      Endpoint.Telemetry.EventsReceived.Add(1, new KeyValuePair<string, object>("puregate.websocket.event", operation.Name));
 
     if (!TryAcquire())
     {

@@ -121,6 +121,7 @@ public sealed partial class WebSocketConnection
       SendFailure(stream.Call, failure, FrameKind.StreamEnd);
     }
 
+    Finished(stream.Call, outcome, failure);
     await stream.Call.DisposeAsync();
     CheckDrained();
   }
@@ -247,6 +248,7 @@ public sealed partial class WebSocketConnection
     else
       SendOutcome(upload.Id, outcome);
 
+    Finished(upload.Call, outcome, null);
     await upload.Call.DisposeAsync();
     CheckDrained();
   }
@@ -260,6 +262,7 @@ public sealed partial class WebSocketConnection
     else
       SendFailure(upload.Call, exception, FrameKind.Response);
 
+    Finished(upload.Call, outcome, exception);
     await upload.Call.DisposeAsync();
     CheckDrained();
   }

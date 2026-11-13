@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="PureGate.WebSocket.Test" />
+    <InternalsVisibleTo Include="PureGate.WebSocket.Benchmarks" />
   </ItemGroup>
 
   <!-- Package. Version and the shared metadata are in Directory.Build.props. -->

@@ -18,6 +18,13 @@ export default defineConfig({
         },
       },
       {
+        // The client's hot paths: yarn bench, on purpose only.
+        test: {
+          name: "bench",
+          include: ["test/bench/*.bench.ts"],
+        },
+      },
+      {
         // Against the .NET TestServer, which the global setup starts.
         test: {
           name: "integration",

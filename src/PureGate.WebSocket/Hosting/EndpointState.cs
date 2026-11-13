@@ -48,6 +48,7 @@ sealed class EndpointState
     Logger = loggers.CreateLogger("PureGate.WebSocket");
     Services = services;
     Scopes = services.GetRequiredService<IServiceScopeFactory>();
+    Telemetry = services.GetRequiredService<Telemetry>();
     ResolveName = Resolve;
     LazyContract = new Lazy<WebSocketContract>(BuildContract);
     hub.AddEndpoint(this);
@@ -68,6 +69,8 @@ sealed class EndpointState
 
   // The app's root services.
   public IServiceProvider Services { get; }
+
+  public Telemetry Telemetry { get; }
 
   // Whether user passes policy, or the default policy for "". Operation policies need services.AddAuthorization().
   public async ValueTask<bool> AuthorizeAsync(ClaimsPrincipal user, string policy)

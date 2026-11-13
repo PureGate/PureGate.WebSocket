@@ -262,7 +262,8 @@ public sealed partial class WebSocketConnection
     DrainTimer?.Dispose();
     ExpiryOfAuthentication?.Dispose();
     Limiter?.Dispose();
-    Endpoint.Sessions.TryRemove(new KeyValuePair<string, WebSocketConnection>(SessionId, this));
+    if (Endpoint.Sessions.TryRemove(new KeyValuePair<string, WebSocketConnection>(SessionId, this)))
+      Endpoint.Telemetry.Sessions.Add(-1);
 
     await SessionCancellation.CancelAsync();
     FailInvokes();

@@ -24,6 +24,7 @@ public static class PureGateWebSocketExtensions
 
     services.TryAddSingleton<WebSocketHub>();
     services.TryAddSingleton<IWebSocketHub>(static provider => provider.GetRequiredService<WebSocketHub>());
+    services.TryAddSingleton(static provider => new Diagnostics.Telemetry(provider.GetService<System.Diagnostics.Metrics.IMeterFactory>()));
     return services;
   }
 

@@ -114,7 +114,7 @@ public sealed partial class WebSocketConnection
     try
     {
       info.Request.Write(buffer, payload);
-      var frame = new Frame
+      scoped var frame = new Frame
       {
         Kind = FrameKind.Request,
         Flags = info.Request.IsBinary ? FrameFlags.Binary : FrameFlags.None,
@@ -125,6 +125,14 @@ public sealed partial class WebSocketConnection
       {
         frame.Flags |= FrameFlags.HasTimeout;
         frame.Timeout = (uint)Math.Clamp(timeout.TotalMilliseconds, 0, uint.MaxValue);
+      }
+
+      // The current trace goes to the browser, which can continue it in its handler.
+      Span<byte> trace = stackalloc byte[256];
+      if (System.Diagnostics.Activity.Current is { IdFormat: System.Diagnostics.ActivityIdFormat.W3C, Id: { Length: > 0 and <= 256 } traceId })
+      {
+        frame.Flags |= FrameFlags.HasTrace;
+        frame.Trace = trace[..System.Text.Encoding.ASCII.GetBytes(traceId, trace)];
       }
 
       var result = Outbox.Write(in frame, info.Descriptor.Name, info.Descriptor.NameUtf8);

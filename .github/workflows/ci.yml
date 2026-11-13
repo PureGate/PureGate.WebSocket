@@ -114,6 +114,11 @@ jobs:
       - name: Build
         run: yarn build
 
+      # What the client costs an app, minified and gzipped. Fails past the budget in scripts/size.ts.
+      - name: Size budget
+        if: matrix.os == 'ubuntu-26.04'
+        run: yarn workspace @puregate/web-socket size
+
       # Checks that the package packs; it is never published from here.
       - name: Pack
         if: matrix.os == 'ubuntu-26.04'

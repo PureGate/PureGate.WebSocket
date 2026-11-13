@@ -34,6 +34,8 @@
     "typecheck": "tsc --noEmit && tsc -p test",
     "test": "vitest run --project unit --project integration --coverage",
     "test:browsers": "vitest run --project browser",
+    "size": "node scripts/size.ts",
+    "bench": "vitest bench --run --project bench",
     "prepack": "tsc"
   },
   "devDependencies": {

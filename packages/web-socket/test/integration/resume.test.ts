@@ -84,6 +84,8 @@ describe("resume", () => {
       return question.text === "sure?";
     });
 
+    // Opened first: a reset right after connecting can lose the Welcome, and a session without one cannot resume.
+    await conn.opened;
     const answer = conn.api.browser.confirm("sure?");
     await pause(20);
     await conn.api.misc.drop();
@@ -96,6 +98,7 @@ describe("chaos", () => {
     const conn = open({ reconnect: { delays: [0], jitter: 0 } });
     const received: string[] = [];
     conn.on.events.received((text) => received.push(text));
+    await conn.opened;
 
     const work: Promise<unknown>[] = [];
     for (let round = 0; round < 5; round++) {

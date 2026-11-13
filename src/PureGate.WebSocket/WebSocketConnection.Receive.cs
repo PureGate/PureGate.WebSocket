@@ -28,7 +28,18 @@ public sealed partial class WebSocketConnection
   string ContractStatus;
 
   // Accepts one WebSocket: a new session, or the resume of one the endpoint still has.
-  internal static Task AcceptAsync(EndpointState endpoint, Link link) => new WebSocketConnection(endpoint, link).RunAsync(link);
+  internal static async Task AcceptAsync(EndpointState endpoint, Link link)
+  {
+    endpoint.Telemetry.Connections.Add(1);
+    try
+    {
+      await new WebSocketConnection(endpoint, link).RunAsync(link);
+    }
+    finally
+    {
+      endpoint.Telemetry.Connections.Add(-1);
+    }
+  }
 
   async Task RunAsync(Link link)
   {
@@ -79,6 +90,7 @@ public sealed partial class WebSocketConnection
       {
         case ResumeOutcome.Resumed:
           // This session was only a stand-in until the right one was found.
+          Endpoint.Telemetry.Resumes.Add(1, new KeyValuePair<string, object>("puregate.websocket.resumed", true));
           Outbox.End();
           await session.RunLinkAsync(link, null, null, default);
           return;
@@ -87,6 +99,9 @@ public sealed partial class WebSocketConnection
           break;
       }
     }
+
+    if (hello.Resume is not null)
+      Endpoint.Telemetry.Resumes.Add(1, new KeyValuePair<string, object>("puregate.websocket.resumed", false));
 
     await RunLinkAsync(link, hello, pipelined, identity);
   }
@@ -175,6 +190,7 @@ public sealed partial class WebSocketConnection
     }
 
     Endpoint.Sessions.TryAdd(SessionId, this);
+    Endpoint.Telemetry.Sessions.Add(1);
     Endpoint.Hub.Add(this);
     Connected = true;
     foreach (var handler in Endpoint.Connected)

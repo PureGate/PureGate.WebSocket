@@ -1,4 +1,5 @@
 using System.Threading.RateLimiting;
+using PureGate.WebSocket.Diagnostics;
 using PureGate.WebSocket.Protocol;
 using PureGate.WebSocket.Serialization;
 
@@ -108,6 +109,7 @@ sealed class RequestOperation<TRequest, TResponse>(
 
     async Task RunAsync()
     {
+      call.Activity = Telemetry.StartActivity(operation.Name, call.TraceParent, connection.Id);
       TResponse result = default;
       try
       {
@@ -162,6 +164,7 @@ sealed class ClientEventOperation<T>(
     public override async Task RunAsync(WebSocketConnection connection)
     {
       var call = connection.BeginEvent(operation.Name, traceParent, lease);
+      using var activity = Telemetry.StartActivity(operation.Name, traceParent, connection.Id);
       try
       {
         if (operation.HasPipeline)
@@ -171,10 +174,12 @@ sealed class ClientEventOperation<T>(
       }
       catch (CallException exception) when (exception.Code is "unauthorized" or "forbidden")
       {
+        activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, exception.Code);
         connection.EventRefused(operation.Name);
       }
       catch (Exception exception) when (!call.CancellationToken.IsCancellationRequested || exception is not OperationCanceledException)
       {
+        activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, "handler_failed");
         connection.EventFailed(operation.Name, exception);
       }
       catch (OperationCanceledException)
@@ -233,6 +238,7 @@ sealed class StreamOperation<TRequest, TItem>(
 
     async Task RunAsync()
     {
+      stream.Call.Activity = Telemetry.StartActivity(operation.Name, stream.Call.TraceParent, connection.Id);
       Exception failure = null;
       try
       {
@@ -312,6 +318,7 @@ sealed class UploadOperation<TRequest, TItem, TResponse>(
 
     async Task RunAsync()
     {
+      upload.Call.Activity = Telemetry.StartActivity(operation.Name, upload.Call.TraceParent, connection.Id);
       TResponse result = default;
       try
       {

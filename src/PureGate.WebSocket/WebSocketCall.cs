@@ -60,6 +60,11 @@ public sealed class WebSocketCall : IAsyncDisposable
 
   internal bool CancelledByClient { get; private set; }
 
+  // When the call began, for its duration, and its trace span when something listens.
+  internal long Started { get; } = System.Diagnostics.Stopwatch.GetTimestamp();
+
+  internal System.Diagnostics.Activity Activity { get; set; }
+
   // The rate limiter's permit, held until the handler finishes.
   internal System.Threading.RateLimiting.RateLimitLease Lease { get; set; }
 

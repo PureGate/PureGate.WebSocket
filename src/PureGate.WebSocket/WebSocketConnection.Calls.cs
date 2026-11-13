@@ -92,6 +92,7 @@ public sealed partial class WebSocketConnection
     else
       SendOutcome(call.Id, outcome);
 
+    Finished(call, outcome, null);
     await call.DisposeAsync();
     CheckDrained();
   }
@@ -105,9 +106,29 @@ public sealed partial class WebSocketConnection
     else
       SendFailure(call, exception, FrameKind.Response);
 
+    Finished(call, outcome, exception);
     await call.DisposeAsync();
     CheckDrained();
   }
+
+  // Ends the call's span and records its duration, with "ok" or the error code it ended with.
+  void Finished(WebSocketCall call, CallOutcome outcome, Exception failure) =>
+    Endpoint.Telemetry.Complete(call.Activity, call.Name, call.Started, OutcomeName(outcome, failure));
+
+  static string OutcomeName(CallOutcome outcome, Exception failure) => outcome switch
+  {
+    CallOutcome.Cancelled => "cancelled",
+    CallOutcome.TimedOut => "timeout",
+    CallOutcome.SessionEnded => "connection_closed",
+    _ => failure switch
+    {
+      null => "ok",
+      CallException callException => callException.Code,
+      InvalidPayloadException => "invalid_payload",
+      ItemTooLargeException => "payload_too_large",
+      _ => "handler_failed",
+    },
+  };
 
   internal void RejectCall(uint id, ErrorCode code, string message) => SendError(id, code, default, message, default);
 

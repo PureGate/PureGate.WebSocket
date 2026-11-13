@@ -1,5 +1,5 @@
 {
-  // Type-checks the tests, the generated contracts under test/ (generated TypeScript must compile), and the Vitest
+  // Type-checks the tests, the generated contracts under test/ (generated TypeScript must compile), the scripts and the Vitest
   // config. They also see Node's types and the repository's test vectors; the library itself sees neither.
   "extends": "../tsconfig.json",
   "compilerOptions": {
@@ -8,5 +8,5 @@
     "types": ["node"],
     "resolveJsonModule": true
   },
-  "include": ["**/*.ts", "../vitest.config.ts"]
+  "include": ["**/*.ts", "../vitest.config.ts", "../scripts/**/*.ts"]
 }

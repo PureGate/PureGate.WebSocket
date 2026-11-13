@@ -116,6 +116,7 @@ public sealed partial class WebSocketConnection
   void SlowConsumer()
   {
     Diagnostics.Log.SlowConsumer(Logger, Id);
+    Endpoint.Telemetry.SlowConsumers.Add(1);
     CloseLink((WebSocketCloseStatus)CloseCodes.SlowConsumer, "The client fell too far behind.", endsSession: false, discard: true);
   }
 
