@@ -1,0 +1,44 @@
+{
+  "name": "@puregate/web-socket",
+  "version": "0.1.0",
+  "description": "Dependency-free TypeScript client for PureGate.WebSocket: typed calls and events between browsers and ASP.NET Core over one WebSocket.",
+  "license": "MIT",
+  "author": "Ahmed Yasin Koculu",
+  "homepage": "https://github.com/PureGate/PureGate.WebSocket",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PureGate/PureGate.WebSocket.git",
+    "directory": "packages/web-socket"
+  },
+  "keywords": [
+    "websocket",
+    "rpc",
+    "realtime",
+    "typescript",
+    "aspnetcore"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepack": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.0"
+  }
+}

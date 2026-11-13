@@ -1,0 +1,18 @@
+{
+  "name": "puregate-websocket",
+  "private": true,
+  "packageManager": "yarn@4.18.1",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "yarn workspace @puregate/web-socket build",
+    "typecheck": "yarn workspace @puregate/web-socket typecheck",
+    "test": "yarn workspace @puregate/web-socket test",
+    "format": "biome format --write",
+    "check": "biome check"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.7"
+  }
+}

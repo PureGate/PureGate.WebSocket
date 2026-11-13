@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <!-- ASP.NET Core is part of the shared framework, not a package. -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <!-- Package. Version and the shared metadata are in Directory.Build.props. -->
+  <PropertyGroup>
+    <PackageId>PureGate.WebSocket</PackageId>
+    <Description>Typed messaging between ASP.NET Core and browsers over WebSockets, with the dependency-free TypeScript client @puregate/web-socket.</Description>
+    <PackageTags>websocket;rpc;realtime;browser;typescript;aspnetcore</PackageTags>
+  </PropertyGroup>
+
+</Project>
