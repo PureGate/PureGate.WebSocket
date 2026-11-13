@@ -18,10 +18,13 @@ export default defineConfig({
         },
       },
       {
-        // The client's hot paths: yarn bench, on purpose only.
+        // The client's hot paths, which `yarn bench` runs as "hot-paths (bench)", on purpose only. Node runs the
+        // sources as they are, without Vite's module runner, whose export getters the loops would measure too.
         test: {
-          name: "bench",
-          include: ["test/bench/*.bench.ts"],
+          name: "hot-paths",
+          include: [],
+          benchmark: { include: ["test/bench/*.bench.ts"] },
+          experimental: { viteModuleRunner: false },
         },
       },
       {

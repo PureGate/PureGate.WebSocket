@@ -22,18 +22,30 @@ interface IBenchClient : IAsyncDisposable
 }
 
 // A minimal PureGate.WebSocket client on the library's own frame codec: Hello, Requests, Acks, and the events it gets.
+// It sends the way the browser client does: every call carries the browser's default deadline, and frames written
+// while a message is going out are coalesced into the next one.
 sealed class PureGateClient : IBenchClient
 {
   const int AckEvery = 64;
 
-  static readonly byte[] Hello = """{"calls":128,"maxMessage":1048576}"""u8.ToArray();
+  // The browser client's default deadline, which it sends with every call.
+  const uint Deadline = 30_000;
+
+  // 64 KiB, as much as the server coalesces into one message.
+  static readonly byte[] Hello = """{"calls":128,"maxMessage":65536}"""u8.ToArray();
+
+  [ThreadStatic] static ArrayBufferWriter<byte> PayloadBuffer;
+  [ThreadStatic] static Utf8JsonWriter PayloadWriter;
 
   readonly ClientWebSocket Socket = new();
-  readonly SemaphoreSlim SendGate = new(1, 1);
+  readonly Lock Gate = new();
   readonly OutgoingNameTable Names = new();
-  readonly ConcurrentDictionary<uint, TaskCompletionSource<string>> Pending = new();
+  readonly ConcurrentDictionary<uint, TaskCompletionSource<string>> Calls = new();
   readonly TaskCompletionSource Welcomed = new(TaskCreationOptions.RunContinuationsAsynchronously);
-  readonly byte[] ReceiveBuffer = new byte[1024 * 1024];
+  readonly byte[] ReceiveBuffer = new byte[64 * 1024];
+  ArrayBufferWriter<byte> Pending = new(4096);
+  ArrayBufferWriter<byte> Outgoing = new(4096);
+  bool Sending;
   Task Receiving;
   int LastId;
   long ReceivedCount;
@@ -46,57 +58,81 @@ sealed class PureGateClient : IBenchClient
     var client = new PureGateClient();
     client.Socket.Options.AddSubProtocol("puregate.v1");
     await client.Socket.ConnectAsync(uri, CancellationToken.None);
-    await client.SendAsync(Encode(new Frame { Kind = FrameKind.Hello, Payload = Hello }));
+    client.Write(new Frame { Kind = FrameKind.Hello, Payload = Hello });
     client.Receiving = client.ReceiveAsync();
     await client.Welcomed.Task;
     return client;
   }
 
-  public async Task<string> EchoAsync(string text) => await CallAsync("bench.echo", text);
+  public Task<string> EchoAsync(string text) => CallAsync("bench.echo", text);
 
   public Task BroadcastAsync(string text) => CallAsync("bench.broadcast", text);
 
-  async Task<string> CallAsync(string name, string text)
+  Task<string> CallAsync(string name, string text)
   {
     var id = (uint)Interlocked.Increment(ref LastId);
     var answer = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-    Pending[id] = answer;
-    var payload = JsonSerializer.SerializeToUtf8Bytes(text, BenchJson.Default.String);
+    Calls[id] = answer;
 
-    await SendGate.WaitAsync();
-    try
-    {
-      var code = Names.Next(name);
-      var nameText = FrameLayout.NameHasText(code) ? Encoding.ASCII.GetBytes(name) : [];
-      var message = Encode(new Frame { Kind = FrameKind.Request, Id = id, NameCode = code, NameText = nameText, Payload = payload });
-      await Socket.SendAsync(message, WebSocketMessageType.Binary, endOfMessage: true, CancellationToken.None);
-    }
-    finally
-    {
-      SendGate.Release();
-    }
+    var payload = PayloadBuffer ??= new ArrayBufferWriter<byte>(2048);
+    payload.ResetWrittenCount();
+    var writer = PayloadWriter ??= new Utf8JsonWriter(payload);
+    writer.Reset(payload);
+    JsonSerializer.Serialize(writer, text, BenchJson.Default.String);
 
-    return await answer.Task;
+    Write(new Frame { Kind = FrameKind.Request, Flags = FrameFlags.HasTimeout, Id = id, Timeout = Deadline, Payload = payload.WrittenSpan }, name);
+    return answer.Task;
   }
 
-  async Task SendAsync(ReadOnlyMemory<byte> message)
+  // Copies the frame into the next message; the writer that finds no send running starts one.
+  void Write(scoped in Frame frame, string name = null)
   {
-    await SendGate.WaitAsync();
-    try
+    bool start;
+    lock (Gate)
     {
-      await Socket.SendAsync(message, WebSocketMessageType.Binary, endOfMessage: true, CancellationToken.None);
+      var copy = frame;
+      if (name is not null)
+      {
+        copy.NameCode = Names.Next(name);
+        copy.NameText = FrameLayout.NameHasText(copy.NameCode) ? Encoding.ASCII.GetBytes(name) : default;
+      }
+
+      FrameWriter.Write(Pending, in copy);
+      start = !Sending;
+      Sending = true;
     }
-    finally
-    {
-      SendGate.Release();
-    }
+
+    if (start)
+      _ = SendAsync();
   }
 
-  static byte[] Encode(scoped in Frame frame)
+  async Task SendAsync()
   {
-    var output = new ArrayBufferWriter<byte>();
-    FrameWriter.Write(output, in frame);
-    return output.WrittenSpan.ToArray();
+    try
+    {
+      while (true)
+      {
+        ArrayBufferWriter<byte> next;
+        lock (Gate)
+        {
+          if (Pending.WrittenCount == 0)
+          {
+            Sending = false;
+            return;
+          }
+
+          next = Pending;
+          Pending = Outgoing;
+          Outgoing = next;
+        }
+
+        await Socket.SendAsync(next.WrittenMemory, WebSocketMessageType.Binary, endOfMessage: true, CancellationToken.None);
+        next.ResetWrittenCount();
+      }
+    }
+    catch (Exception exception) when (exception is WebSocketException or ObjectDisposedException)
+    {
+    }
   }
 
   async Task ReceiveAsync()
@@ -117,8 +153,7 @@ sealed class PureGateClient : IBenchClient
         if (result.MessageType == WebSocketMessageType.Close)
           break;
 
-        if (Process(length) is { } ack)
-          _ = SendAsync(ack);
+        Process(length);
       }
     }
     catch (WebSocketException)
@@ -126,13 +161,13 @@ sealed class PureGateClient : IBenchClient
     }
     finally
     {
-      foreach (var pending in Pending.Values)
-        pending.TrySetException(new WebSocketException("The connection closed."));
+      foreach (var call in Calls.Values)
+        call.TrySetException(new WebSocketException("The connection closed."));
     }
   }
 
-  // Handles one message; returns an Ack to send when one is due.
-  byte[] Process(int length)
+  // Handles one message, then acknowledges what it processed when an Ack is due.
+  void Process(int length)
   {
     var reader = new FrameReader(ReceiveBuffer.AsSpan(0, length), Side.Server);
     var sequenced = 0;
@@ -146,7 +181,7 @@ sealed class PureGateClient : IBenchClient
         case FrameKind.Welcome:
           Welcomed.TrySetResult();
           break;
-        case FrameKind.Response when Pending.TryRemove(frame.Id, out var answer):
+        case FrameKind.Response when Calls.TryRemove(frame.Id, out var answer):
           if (frame.Has(FrameFlags.HasError))
             answer.TrySetException(new InvalidOperationException(Encoding.UTF8.GetString(frame.ErrorMessage)));
           else
@@ -161,10 +196,10 @@ sealed class PureGateClient : IBenchClient
     ReceivedCount += sequenced;
     Unacknowledged += sequenced;
     if (Unacknowledged < AckEvery)
-      return null;
+      return;
 
     Unacknowledged = 0;
-    return Encode(new Frame { Kind = FrameKind.Ack, Count = (uint)ReceivedCount });
+    Write(new Frame { Kind = FrameKind.Ack, Count = (uint)ReceivedCount });
   }
 
   public async ValueTask DisposeAsync()

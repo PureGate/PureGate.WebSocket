@@ -315,7 +315,7 @@ The suite runs once per change. Repeated runs and benchmarks happen at the end o
 | One event broadcast to 10,000 connections | time until the last connection has it |
 | Any call | server allocations per call |
 
-Benchmarks run only when you ask, with tiered compilation off (`TC=0`), no warmup, each run under 3 minutes, reporting the median of several runs.
+Benchmarks run only when you ask, with tiered compilation off (`TC=0`), no warmup, each run under 3 minutes, reporting the median of several runs. The results are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Work by phase
 

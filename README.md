@@ -27,6 +27,7 @@ Beyond calls: server → browser calls, events to users and groups, streams and 
 - [The protocol](docs/PROTOCOL.md): the wire format, which both packages implement and test against the shared [test vectors](test-vectors/frames.json).
 - [The plan](docs/PLAN.md), and the designs of [the server](docs/PLAN-SERVER.md) and [the client](docs/PLAN-CLIENT.md).
 - [The chat sample](samples/chat/README.md).
+- [The benchmarks](docs/BENCHMARKS.md) against SignalR, and of the browser client.
 
 ## Repository
 
