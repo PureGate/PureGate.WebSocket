@@ -31,12 +31,13 @@
   ],
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "typecheck": "tsc --noEmit && tsc -p test",
+    "test": "vitest run --coverage",
     "prepack": "tsc"
   },
   "devDependencies": {
     "@types/node": "26.6.6",
+    "@vitest/coverage-v8": "5.1.0",
     "typescript": "7.0.2",
     "vite": "8.3.8",
     "vitest": "5.1.0"

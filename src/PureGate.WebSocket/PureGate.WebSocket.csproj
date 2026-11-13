@@ -13,6 +13,10 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="PureGate.WebSocket.Test" />
+  </ItemGroup>
+
   <!-- Package. Version and the shared metadata are in Directory.Build.props. -->
   <PropertyGroup>
     <PackageId>PureGate.WebSocket</PackageId>

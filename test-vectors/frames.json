@@ -1,0 +1,586 @@
+{
+  "description": "Byte-level test vectors for the PureGate.WebSocket wire protocol (docs/PROTOCOL.md). The .NET and TypeScript test suites both pass every one. A bytes value lists two-digit hex bytes and 'quoted' UTF-8 text, separated by spaces. A frame lists only the fields its kind and flags carry; its payload is the UTF-8 text in json, or the bytes in bytes, or empty when it has neither. An invalid input names the violation it must be rejected with.",
+  "errorCodes": [
+    "timeout",
+    "cancelled",
+    "unauthorized",
+    "forbidden",
+    "unknown_operation",
+    "invalid_payload",
+    "payload_too_large",
+    "overloaded",
+    "handler_failed",
+    "connection_closed",
+    "protocol_error"
+  ],
+  "varints": {
+    "valid": [
+      { "bytes": "00", "value": 0 },
+      { "bytes": "01", "value": 1 },
+      { "bytes": "7f", "value": 127 },
+      { "bytes": "80 01", "value": 128 },
+      { "bytes": "ff 01", "value": 255 },
+      { "bytes": "ac 02", "value": 300 },
+      { "bytes": "88 27", "value": 5000 },
+      { "bytes": "ff 7f", "value": 16383 },
+      { "bytes": "80 80 01", "value": 16384 },
+      { "bytes": "80 80 80 80 01", "value": 268435456 },
+      { "bytes": "ff ff ff ff 0f", "value": 4294967295 },
+      { "bytes": "80 00", "value": 0, "shortest": false }
+    ],
+    "invalid": [
+      { "bytes": "", "violation": "truncated" },
+      { "bytes": "80", "violation": "truncated" },
+      { "bytes": "ff ff", "violation": "truncated" },
+      { "bytes": "80 80 80 80", "violation": "truncated" },
+      { "bytes": "80 80 80 80 80", "violation": "varint_too_long" },
+      { "bytes": "ff ff ff ff ff 01", "violation": "varint_too_long" },
+      { "bytes": "80 80 80 80 10", "violation": "varint_overflow" },
+      { "bytes": "ff ff ff ff 1f", "violation": "varint_overflow" }
+    ]
+  },
+  "messages": {
+    "valid": [
+      {
+        "description": "Hello",
+        "from": "client",
+        "bytes": "0d 01 '{\"calls\":16}'",
+        "frames": [{ "kind": "Hello", "json": "{\"calls\":16}" }]
+      },
+      {
+        "description": "Welcome",
+        "from": "server",
+        "bytes": "03 02 '{}'",
+        "frames": [{ "kind": "Welcome", "json": "{}" }]
+      },
+      {
+        "description": "Hello with a Request pipelined after it, as in the protocol's example",
+        "from": "client",
+        "bytes": "20 01 '{\"contract\":\"9f3a1c0b7d2e4a65\"}' 11 03 00 01 03 0a 'orders.get' '42'",
+        "frames": [
+          { "kind": "Hello", "json": "{\"contract\":\"9f3a1c0b7d2e4a65\"}" },
+          { "kind": "Request", "id": 1, "name": { "code": 3, "text": "orders.get" }, "json": "42" }
+        ]
+      },
+      {
+        "description": "Request that refers to a defined name and has a timeout",
+        "from": "client",
+        "bytes": "07 03 02 03 02 88 27 '7'",
+        "frames": [{ "kind": "Request", "id": 3, "name": { "code": 2 }, "timeout": 5000, "json": "7" }]
+      },
+      {
+        "description": "Two frames coalesced into one message",
+        "from": "client",
+        "bytes": "05 03 00 02 02 '7' 01 0c",
+        "frames": [{ "kind": "Request", "id": 2, "name": { "code": 2 }, "json": "7" }, { "kind": "Ping" }]
+      },
+      {
+        "description": "Request with a binary payload, a literal name, a timeout and a trace, in field order",
+        "from": "server",
+        "bytes": "0a 03 0b 02 00 01 'a' 01 01 't' ff",
+        "frames": [
+          {
+            "kind": "Request",
+            "binary": true,
+            "id": 2,
+            "name": { "code": 0, "text": "a" },
+            "timeout": 1,
+            "trace": "t",
+            "bytes": "ff"
+          }
+        ]
+      },
+      {
+        "description": "Request with the largest id and no payload",
+        "from": "server",
+        "bytes": "0b 03 02 ff ff ff ff 0f 02 b0 ea 01",
+        "frames": [{ "kind": "Request", "id": 4294967295, "name": { "code": 2 }, "timeout": 30000 }]
+      },
+      {
+        "description": "Request with an empty binary payload and a timeout of 0",
+        "from": "client",
+        "bytes": "05 03 03 09 02 00",
+        "frames": [{ "kind": "Request", "binary": true, "id": 9, "name": { "code": 2 }, "timeout": 0 }]
+      },
+      {
+        "description": "Response",
+        "from": "server",
+        "bytes": "18 04 00 01 '{\"id\":42,\"total\":9.5}'",
+        "frames": [{ "kind": "Response", "id": 1, "json": "{\"id\":42,\"total\":9.5}" }]
+      },
+      {
+        "description": "Response that fails with an application code",
+        "from": "server",
+        "bytes": "1e 04 04 03 00 09 'not_found' 0f 'Order 7 missing'",
+        "frames": [
+          { "kind": "Response", "id": 3, "error": { "code": 0, "custom": "not_found", "message": "Order 7 missing" } }
+        ]
+      },
+      {
+        "description": "Response that fails with a library code, an empty message and details",
+        "from": "server",
+        "bytes": "07 04 04 05 01 00 '{}'",
+        "frames": [{ "kind": "Response", "id": 5, "error": { "code": 1, "message": "" }, "json": "{}" }]
+      },
+      {
+        "description": "Response from the browser with a UTF-8 error message",
+        "from": "client",
+        "bytes": "0a 04 04 0b 09 05 'café'",
+        "frames": [{ "kind": "Response", "id": 11, "error": { "code": 9, "message": "café" } }]
+      },
+      {
+        "description": "Event with a trace",
+        "from": "client",
+        "bytes": "52 05 08 00 0f 'telemetry.click' 37 '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' '{\"x\":1}'",
+        "frames": [
+          {
+            "kind": "Event",
+            "name": { "code": 0, "text": "telemetry.click" },
+            "trace": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            "json": "{\"x\":1}"
+          }
+        ]
+      },
+      {
+        "description": "Event with a binary payload that defines a name",
+        "from": "server",
+        "bytes": "15 05 01 03 0e 'orders.shipped' 00 ff 10",
+        "frames": [
+          { "kind": "Event", "binary": true, "name": { "code": 3, "text": "orders.shipped" }, "bytes": "00 ff 10" }
+        ]
+      },
+      {
+        "description": "StreamOpen for a download",
+        "from": "client",
+        "bytes": "18 06 00 07 00 0c 'prices.watch' 10 '\"MSFT\"'",
+        "frames": [
+          {
+            "kind": "StreamOpen",
+            "id": 7,
+            "name": { "code": 0, "text": "prices.watch" },
+            "credit": 16,
+            "json": "\"MSFT\""
+          }
+        ]
+      },
+      {
+        "description": "StreamOpen for an upload",
+        "from": "client",
+        "bytes": "1f 06 10 08 05 09 'files.put' 00 '{\"name\":\"a.txt\"}'",
+        "frames": [
+          {
+            "kind": "StreamOpen",
+            "upload": true,
+            "id": 8,
+            "name": { "code": 5, "text": "files.put" },
+            "credit": 0,
+            "json": "{\"name\":\"a.txt\"}"
+          }
+        ]
+      },
+      {
+        "description": "StreamItem of an upload, from the browser",
+        "from": "client",
+        "bytes": "07 07 01 08 01 02 03 04",
+        "frames": [{ "kind": "StreamItem", "binary": true, "id": 8, "bytes": "01 02 03 04" }]
+      },
+      {
+        "description": "StreamItem of a download, from the server",
+        "from": "server",
+        "bytes": "0a 07 00 07 '{\"p\":1}'",
+        "frames": [{ "kind": "StreamItem", "id": 7, "json": "{\"p\":1}" }]
+      },
+      {
+        "description": "StreamItem whose length prefix takes two bytes",
+        "from": "server",
+        "bytes": "80 01 07 01 01 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'",
+        "frames": [
+          {
+            "kind": "StreamItem",
+            "binary": true,
+            "id": 1,
+            "bytes": "'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'"
+          }
+        ]
+      },
+      {
+        "description": "StreamEnd of a download",
+        "from": "server",
+        "bytes": "03 08 00 07",
+        "frames": [{ "kind": "StreamEnd", "id": 7 }]
+      },
+      {
+        "description": "StreamEnd that fails with cancelled",
+        "from": "server",
+        "bytes": "05 08 04 07 02 00",
+        "frames": [{ "kind": "StreamEnd", "id": 7, "error": { "code": 2, "message": "" } }]
+      },
+      {
+        "description": "StreamEnd of an upload, from the browser",
+        "from": "client",
+        "bytes": "03 08 00 08",
+        "frames": [{ "kind": "StreamEnd", "id": 8 }]
+      },
+      {
+        "description": "Credit for events",
+        "from": "server",
+        "bytes": "03 09 00 40",
+        "frames": [{ "kind": "Credit", "id": 0, "amount": 64 }]
+      },
+      {
+        "description": "Credit for a stream",
+        "from": "client",
+        "bytes": "03 09 07 08",
+        "frames": [{ "kind": "Credit", "id": 7, "amount": 8 }]
+      },
+      {
+        "description": "Cancel",
+        "from": "client",
+        "bytes": "02 0a 03",
+        "frames": [{ "kind": "Cancel", "id": 3 }]
+      },
+      {
+        "description": "Ack",
+        "from": "server",
+        "bytes": "03 0b ac 02",
+        "frames": [{ "kind": "Ack", "count": 300 }]
+      },
+      {
+        "description": "Ping and Pong",
+        "from": "server",
+        "bytes": "01 0c 01 0d",
+        "frames": [{ "kind": "Ping" }, { "kind": "Pong" }]
+      },
+      {
+        "description": "Authenticate",
+        "from": "client",
+        "bytes": "0e 0e '{\"token\":\"t\"}'",
+        "frames": [{ "kind": "Authenticate", "json": "{\"token\":\"t\"}" }]
+      },
+      {
+        "description": "Authenticated",
+        "from": "server",
+        "bytes": "12 0f '{\"expires\":60000}'",
+        "frames": [{ "kind": "Authenticated", "json": "{\"expires\":60000}" }]
+      },
+      {
+        "description": "GoAway",
+        "from": "server",
+        "bytes": "01 10",
+        "frames": [{ "kind": "GoAway" }]
+      }
+    ],
+    "invalid": [
+      { "description": "Message without frames", "from": "client", "bytes": "", "violation": "empty_message" },
+      { "description": "Frame of length 0", "from": "client", "bytes": "00", "violation": "empty_frame" },
+      {
+        "description": "Frame of length 0 after a valid one",
+        "from": "client",
+        "bytes": "01 0c 00",
+        "violation": "empty_frame"
+      },
+      {
+        "description": "Frame longer than its message",
+        "from": "client",
+        "bytes": "05 03 00",
+        "violation": "frame_overrun"
+      },
+      { "description": "Length prefix cut short", "from": "client", "bytes": "80", "violation": "truncated" },
+      { "description": "Kind 0", "from": "client", "bytes": "01 00", "violation": "reserved_kind" },
+      { "description": "Kind 17", "from": "client", "bytes": "01 11", "violation": "reserved_kind" },
+      { "description": "Kind 255", "from": "server", "bytes": "01 ff", "violation": "reserved_kind" },
+      {
+        "description": "Welcome from the client",
+        "from": "client",
+        "bytes": "03 02 '{}'",
+        "violation": "wrong_direction"
+      },
+      {
+        "description": "Hello from the server",
+        "from": "server",
+        "bytes": "03 01 '{}'",
+        "violation": "wrong_direction"
+      },
+      {
+        "description": "StreamOpen from the server",
+        "from": "server",
+        "bytes": "05 06 00 01 02 01",
+        "violation": "wrong_direction"
+      },
+      {
+        "description": "Authenticate from the server",
+        "from": "server",
+        "bytes": "03 0e '{}'",
+        "violation": "wrong_direction"
+      },
+      { "description": "GoAway from the client", "from": "client", "bytes": "01 10", "violation": "wrong_direction" },
+      { "description": "Request without its flags", "from": "client", "bytes": "01 03", "violation": "truncated" },
+      {
+        "description": "Reserved flag bit 5",
+        "from": "client",
+        "bytes": "04 03 20 01 02",
+        "violation": "reserved_flag"
+      },
+      {
+        "description": "Reserved flag bit 7",
+        "from": "client",
+        "bytes": "04 03 80 01 02",
+        "violation": "reserved_flag"
+      },
+      {
+        "description": "HasTimeout on an Event",
+        "from": "client",
+        "bytes": "04 05 02 02 '7'",
+        "violation": "invalid_flag"
+      },
+      {
+        "description": "HasError on a Request",
+        "from": "client",
+        "bytes": "05 03 04 01 02 '7'",
+        "violation": "invalid_flag"
+      },
+      {
+        "description": "Upload on a Request",
+        "from": "client",
+        "bytes": "05 03 10 01 02 '7'",
+        "violation": "invalid_flag"
+      },
+      {
+        "description": "HasTimeout on a StreamEnd",
+        "from": "server",
+        "bytes": "03 08 02 01",
+        "violation": "invalid_flag"
+      },
+      {
+        "description": "HasError on a StreamItem",
+        "from": "server",
+        "bytes": "03 07 04 01",
+        "violation": "invalid_flag"
+      },
+      { "description": "Request with id 0", "from": "client", "bytes": "04 03 00 00 02", "violation": "invalid_id" },
+      { "description": "Response with id 0", "from": "server", "bytes": "03 04 00 00", "violation": "invalid_id" },
+      { "description": "Cancel with id 0", "from": "client", "bytes": "02 0a 00", "violation": "invalid_id" },
+      {
+        "description": "StreamOpen with id 0",
+        "from": "client",
+        "bytes": "05 06 00 00 02 01",
+        "violation": "invalid_id"
+      },
+      {
+        "description": "Name with an empty segment",
+        "from": "client",
+        "bytes": "11 03 00 01 00 0b 'orders..get' '7'",
+        "violation": "invalid_name"
+      },
+      {
+        "description": "Name segment that starts with a digit",
+        "from": "client",
+        "bytes": "07 03 00 01 00 02 '1a'",
+        "violation": "invalid_name"
+      },
+      { "description": "Empty name", "from": "client", "bytes": "05 03 00 01 00 00", "violation": "invalid_name" },
+      {
+        "description": "Name that ends with a dot",
+        "from": "client",
+        "bytes": "07 03 00 01 00 02 'a.'",
+        "violation": "invalid_name"
+      },
+      {
+        "description": "Name that starts with a dot",
+        "from": "client",
+        "bytes": "07 03 00 01 00 02 '.a'",
+        "violation": "invalid_name"
+      },
+      {
+        "description": "Name with a dash",
+        "from": "client",
+        "bytes": "07 05 00 00 03 'a-b'",
+        "violation": "invalid_name"
+      },
+      {
+        "description": "Name that is not ASCII",
+        "from": "client",
+        "bytes": "06 05 00 00 02 'é'",
+        "violation": "invalid_name"
+      },
+      {
+        "description": "Name longer than its frame",
+        "from": "client",
+        "bytes": "05 03 00 01 00 0a",
+        "violation": "truncated"
+      },
+      { "description": "Id cut short", "from": "client", "bytes": "03 03 00 80", "violation": "truncated" },
+      {
+        "description": "Id varint longer than 5 bytes",
+        "from": "client",
+        "bytes": "08 03 00 80 80 80 80 80 01",
+        "violation": "varint_too_long"
+      },
+      {
+        "description": "Id of 2^32 or more",
+        "from": "client",
+        "bytes": "08 03 00 ff ff ff ff 10 02",
+        "violation": "varint_overflow"
+      },
+      {
+        "description": "HasTimeout without a timeout",
+        "from": "client",
+        "bytes": "04 03 02 01 02",
+        "violation": "truncated"
+      },
+      { "description": "HasTrace without a trace", "from": "client", "bytes": "03 05 08 02", "violation": "truncated" },
+      {
+        "description": "HasError without the error's message",
+        "from": "server",
+        "bytes": "04 04 04 01 01",
+        "violation": "truncated"
+      },
+      {
+        "description": "Error code 12",
+        "from": "server",
+        "bytes": "05 04 04 01 0c 00",
+        "violation": "invalid_error_code"
+      },
+      {
+        "description": "Custom code with capitals",
+        "from": "server",
+        "bytes": "0f 04 04 01 00 09 'Not_Found' 00",
+        "violation": "invalid_custom_code"
+      },
+      {
+        "description": "Empty custom code",
+        "from": "server",
+        "bytes": "06 04 04 01 00 00 00",
+        "violation": "invalid_custom_code"
+      },
+      {
+        "description": "Error message that is not UTF-8",
+        "from": "server",
+        "bytes": "06 04 04 01 01 01 ff",
+        "violation": "invalid_string"
+      },
+      {
+        "description": "Trace with a space",
+        "from": "client",
+        "bytes": "08 05 08 02 03 'a b' '7'",
+        "violation": "invalid_trace"
+      },
+      { "description": "Empty trace", "from": "client", "bytes": "05 05 08 02 00 '7'", "violation": "invalid_trace" },
+      {
+        "description": "Download with no credit",
+        "from": "client",
+        "bytes": "05 06 00 01 02 00",
+        "violation": "invalid_credit"
+      },
+      {
+        "description": "Upload with credit",
+        "from": "client",
+        "bytes": "05 06 10 01 02 04",
+        "violation": "invalid_credit"
+      },
+      { "description": "Credit of 0", "from": "client", "bytes": "03 09 01 00", "violation": "invalid_credit" },
+      {
+        "description": "Ping with a byte after it",
+        "from": "client",
+        "bytes": "02 0c 00",
+        "violation": "trailing_bytes"
+      },
+      {
+        "description": "Cancel with a byte after it",
+        "from": "client",
+        "bytes": "03 0a 01 00",
+        "violation": "trailing_bytes"
+      },
+      {
+        "description": "Ack with a byte after it",
+        "from": "client",
+        "bytes": "03 0b 01 01",
+        "violation": "trailing_bytes"
+      },
+      {
+        "description": "Credit with a byte after it",
+        "from": "client",
+        "bytes": "04 09 01 01 00",
+        "violation": "trailing_bytes"
+      },
+      {
+        "description": "GoAway with a byte after it",
+        "from": "server",
+        "bytes": "02 10 00",
+        "violation": "trailing_bytes"
+      }
+    ]
+  },
+  "names": {
+    "incoming": [
+      {
+        "description": "Definitions, references and literals",
+        "limit": 4,
+        "fields": [
+          { "code": 3, "text": "orders.get" },
+          { "code": 2 },
+          { "code": 5, "text": "orders.list" },
+          { "code": 4 },
+          { "code": 0, "text": "misc.ping" },
+          { "code": 2 }
+        ],
+        "names": ["orders.get", "orders.get", "orders.list", "orders.list", "misc.ping", "orders.get"]
+      },
+      {
+        "description": "Literal names after the table is full",
+        "limit": 1,
+        "fields": [{ "code": 3, "text": "a" }, { "code": 0, "text": "b" }, { "code": 2 }],
+        "names": ["a", "b", "a"]
+      },
+      {
+        "description": "The same text under two numbers",
+        "limit": 4,
+        "fields": [{ "code": 3, "text": "a" }, { "code": 5, "text": "a" }, { "code": 4 }],
+        "names": ["a", "a", "a"]
+      },
+      {
+        "description": "Definition that skips a number",
+        "limit": 4,
+        "fields": [{ "code": 5, "text": "a" }],
+        "violation": "name_out_of_order",
+        "at": 0
+      },
+      {
+        "description": "Definition of name number 0",
+        "limit": 4,
+        "fields": [{ "code": 1, "text": "a" }],
+        "violation": "name_out_of_order",
+        "at": 0
+      },
+      {
+        "description": "Reference to a name not yet defined",
+        "limit": 4,
+        "fields": [{ "code": 3, "text": "a" }, { "code": 4 }],
+        "violation": "name_undefined",
+        "at": 1
+      },
+      {
+        "description": "Definition past the limit",
+        "limit": 1,
+        "fields": [{ "code": 3, "text": "a" }, { "code": 5, "text": "b" }],
+        "violation": "name_table_full",
+        "at": 1
+      }
+    ],
+    "outgoing": [
+      {
+        "description": "Defines names in order, refers to them after, and sends literals once full",
+        "limit": 2,
+        "names": ["a", "b", "a", "c", "b", "c"],
+        "fields": [
+          { "code": 3, "text": "a" },
+          { "code": 5, "text": "b" },
+          { "code": 2 },
+          { "code": 0, "text": "c" },
+          { "code": 4 },
+          { "code": 0, "text": "c" }
+        ]
+      }
+    ]
+  }
+}

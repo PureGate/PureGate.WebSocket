@@ -3,6 +3,8 @@ bin/
 obj/
 node_modules/
 dist/
+coverage/
+artifacts/
 .yarn/*
 !.yarn/patches
 !.yarn/plugins

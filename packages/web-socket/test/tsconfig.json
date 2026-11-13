@@ -1,0 +1,12 @@
+{
+  // Type-checks the tests and the Vitest config. They also see Node's types and the repository's test vectors;
+  // the library itself sees neither.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../../..",
+    "noEmit": true,
+    "types": ["node"],
+    "resolveJsonModule": true
+  },
+  "include": ["**/*.ts", "../vitest.config.ts"]
+}

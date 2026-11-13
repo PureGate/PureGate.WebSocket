@@ -147,7 +147,6 @@ Defaults are sized for untrusted clients on the public internet.
 | `ContractMismatch` | `Warn` | `Ignore`, `Warn` (log it and tell the client) or `Reject` (close with 4004). |
 | `EventOrdering` | `Sequential` | Events from one connection are handled one at a time, in order. `Concurrent` lifts that. |
 | `EnableCompression` | false | permessage-deflate (see [Security](#security)). |
-| `MaxNames` | 1,024 | Names the client may define. |
 
 The memory one connection can hold is bounded by these limits: one message being received, the send queue, the replay buffer, and the request payloads within the calls window.
 
@@ -177,7 +176,7 @@ The goal is less CPU, memory and allocation per message and per connection than 
 
 1. **Receiving.** `WebSocket.ReceiveAsync(Memory<byte>)` returns a `ValueTask`, so receiving allocates nothing. Buffers are rented, grown to fit the message, and returned once its frames are processed. An idle connection should hold no rented buffer. Check whether ASP.NET Core's managed WebSocket supports a zero-byte receive for waiting; if not, use a small fixed buffer.
 2. **Parsing in place.** `FrameReader` is a `ref struct` over the message bytes. Payloads are deserialized straight from the span, using a `JsonTypeInfo<T>` resolved once at mapping time. There are no per-call type lookups and no intermediate strings.
-3. **Names.** A name reference is an index into an array of resolved operations. A literal name is looked up through a frozen dictionary's span-based alternate lookup, after decoding its ASCII bytes on the stack.
+3. **Names.** A name reference is an index into an array of resolved operations. A literal name is looked up through a frozen dictionary's span-based alternate lookup, after decoding its ASCII bytes on the stack. The table never keeps a client's text: a name without a handler resolves to one shared "unknown" entry. The protocol's 1,024 definitions per connection therefore cost at most one reference each, however long the names are.
 4. **Sending.** Frames are written with `Utf8JsonWriter` into pooled buffers. A sender writes directly when no send is in progress and queues otherwise. The sender that finishes drains the queue, coalescing queued frames into one message of up to 64 KiB. There is no send task per connection.
 5. **Broadcast.** The payload is serialized once into a reference-counted pooled buffer. Each connection writes its own small header (its name code differs) and copies the payload. A slow connection never holds up the others: its frames queue, and its slow-consumer policy applies.
 6. **Dispatch.** Handlers run as pooled `IThreadPoolWorkItem`s, so the receive loop never waits for one. `CancellationTokenSource`s are reused with `TryReset`, call contexts are pooled, and the built-in delegates are static. Synchronous completions don't allocate.

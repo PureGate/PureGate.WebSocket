@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Bash on every runner, so a failing command fails its step there too. PowerShell would only check the last
+# command of a multi-line step.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  dotnet:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # The server targets .NET 10 and 11, and the tests run on both.
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: |
+            10.0.x
+            11.0.x
+
+      - name: Build
+        run: dotnet build PureGate.WebSocket.slnx -c Release
+
+      - name: Test
+        run: dotnet test src/PureGate.WebSocket.Test -c Release --no-build --blame-hang-timeout 2m --collect:"XPlat Code Coverage" --results-directory artifacts/coverage
+
+      # Fails the build when line coverage of the server drops below 85% on either framework.
+      - name: Coverage gate
+        run: |
+          files=$(find artifacts/coverage -name coverage.cobertura.xml)
+          [ "$(echo "$files" | grep -c .)" = "2" ] || { echo "::error::Expected a coverage report per framework, found: $files"; exit 1; }
+          for file in $files; do
+            rate=$(grep -oE '<coverage line-rate="[0-9.]+"' "$file" | grep -oE '[0-9]+(\.[0-9]+)?')
+            echo "Line coverage: $rate ($file)"
+            awk -v rate="$rate" 'BEGIN { exit !(rate >= 0.85) }' || { echo "::error::Line coverage $rate is below 0.85"; exit 1; }
+          done
+
+      # Checks that the package builds; it is never published from here.
+      - name: Pack
+        if: matrix.os == 'ubuntu-26.04'
+        run: dotnet pack src/PureGate.WebSocket -c Release --no-build -o artifacts/packages
+
+  typescript:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+
+      # Node 25 and later no longer ship Corepack, which provides the Yarn version package.json pins.
+      - name: Enable Corepack
+        run: |
+          npm install --global corepack@latest
+          corepack enable
+
+      - name: Install
+        run: yarn install --immutable
+
+      - name: Format and lint
+        run: yarn check
+
+      - name: Type-check
+        run: yarn typecheck
+
+      # Fails when line coverage drops below 85% (vitest.config.ts).
+      - name: Test
+        run: yarn test
+
+      - name: Build
+        run: yarn build
+
+      # Checks that the package packs; it is never published from here.
+      - name: Pack
+        if: matrix.os == 'ubuntu-26.04'
+        run: yarn workspace @puregate/web-socket pack --dry-run

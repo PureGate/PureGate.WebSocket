@@ -1,6 +1,6 @@
 # PureGate.WebSocket wire protocol
 
-Version 1. This is what a browser client and an ASP.NET Core server send each other over one WebSocket. The .NET package `PureGate.WebSocket` and the npm package `@puregate/web-socket` both implement it, and both test suites check the same byte-level test vectors (`test-vectors/frames.json`).
+Version 1. This is what a browser client and an ASP.NET Core server send each other over one WebSocket. The .NET package `PureGate.WebSocket` and the npm package `@puregate/web-socket` both implement it, and both test suites check the same byte-level test vectors (`test-vectors/frames.json`). The vectors also name the violation each malformed input is rejected for, so both implementations fail the same way.
 
 ## Transport
 
@@ -21,7 +21,7 @@ There are no fixed-width integers; every number is a varint.
 |---|---|
 | `u8` | One byte. |
 | `varint` | Unsigned LEB128: 7 bits per byte, least significant group first, high bit set on every byte but the last. Values are below 2^32, so at most 5 bytes. Encoders write the shortest form. Decoders reject a varint longer than 5 bytes or a value of 2^32 or more. |
-| `str` | Byte length as a `varint`, then that many bytes of UTF-8. |
+| `str` | Byte length as a `varint`, then that many bytes of valid UTF-8. |
 
 ## Messages and frames
 
@@ -30,7 +30,7 @@ message = frame+
 frame   = length:varint  kind:u8  body        length counts kind and body
 ```
 
-A sender may put any number of frames in one message, up to the receiver's limit, and should coalesce frames that are ready at the same time. Receivers process frames in order.
+A sender may put any number of frames in one message, up to the receiver's limit, and should coalesce frames that are ready at the same time. Receivers process frames in order. A message without frames, and a frame whose length is 0 or runs past the end of its message, are protocol errors.
 
 ### Frame kinds
 
@@ -62,7 +62,7 @@ Kinds 0 and 17–255 are reserved. Receiving a reserved kind, or a kind from the
 | 0 | Binary | The payload is raw bytes, not JSON. | Request, Response, Event, StreamOpen, StreamItem, StreamEnd |
 | 1 | HasTimeout | A `timeout:varint` field follows the name: the milliseconds the caller still waits, measured when the frame is sent. | Request |
 | 2 | HasError | An `error` field follows the id. The exchange failed. | Response, StreamEnd |
-| 3 | HasTrace | A `trace:str` field follows: a W3C `traceparent`. | Request, Event, StreamOpen |
+| 3 | HasTrace | A `trace:str` field follows: a W3C `traceparent`, 1–256 bytes of printable ASCII (0x21–0x7E). | Request, Event, StreamOpen |
 | 4 | Upload | The client produces this stream's items (an upload) instead of reading them. | StreamOpen |
 | 5–7 | | Reserved, must be 0. | |
 
@@ -75,10 +75,11 @@ The payload is whatever is left of the frame after its fields; it has no length 
 - Binary flag clear: a UTF-8 JSON value without a byte order mark. An empty payload means no value (`void` in C#, `undefined` in TypeScript), which is different from the JSON `null`.
 - Binary flag set: raw bytes. An empty payload is a zero-length byte array.
 - On a failed Response or StreamEnd, the payload carries optional error details as JSON, or nothing.
+- Kinds whose layout has no payload (Credit, Cancel, Ack, Ping, Pong, GoAway) end at their last field. Bytes after it are a protocol error.
 
 ### Ids
 
-The side that starts an exchange picks its id: Requests and StreamOpens share one counter per direction, from 1 to 2^32 − 1. After wrapping, ids still in use are skipped. The two directions number independently, so each frame says whose exchange it means:
+The side that starts an exchange picks its id: Requests and StreamOpens share one counter per direction, from 1 to 2^32 − 1. After wrapping, ids still in use are skipped. An id of 0 is a protocol error, except on a Credit. The two directions number independently, so each frame says whose exchange it means:
 
 | Frame | Its id names an exchange started by |
 |---|---|
@@ -132,7 +133,7 @@ error = code:varint  [custom:str]  message:str
 | 10 | `connection_closed` | The connection closed before the exchange finished. Mostly produced locally. |
 | 11 | `protocol_error` | The peer broke this protocol. Produced locally. |
 
-`message` is human-readable text and may be empty.
+A code above 11 is a protocol error. `message` is human-readable text and may be empty.
 
 ## Handshake
 
@@ -186,7 +187,7 @@ A connection's authentication can expire, for example when it was made with a sh
 The client opens every stream with StreamOpen, so a stream's id is always the client's.
 
 - **Download** (Upload flag clear): the server produces the items.
-  - StreamOpen carries the request payload and the client's initial credit.
+  - StreamOpen carries the request payload and the client's initial credit, at least 1.
   - The server sends StreamItems within credit and ends with exactly one StreamEnd. The client grants more credit as the application reads.
   - After a Cancel from the client, the server ends the stream with a StreamEnd that fails with `cancelled`.
 - **Upload** (Upload flag set): the client produces the items.
@@ -201,7 +202,7 @@ Every window is a promise the receiver makes and the sender keeps. Going past on
 - **Calls.** At most `calls` Requests outstanding, each freed by its Response. This applies in both directions: the server's `calls` from Welcome, the client's from Hello. No Credit frames are needed.
 - **Streams.** At most `streams` streams open at once, downloads and uploads together.
 - **Client events.** At most `events` Events sent and not yet credited. The server returns credit with a Credit frame (id 0, amount = count) as its handlers pick events up, about every quarter of the window.
-- **Stream items.** A producer never sends more StreamItems than it has credit for, and Credit frames (id = stream id) grant more.
+- **Stream items.** A producer never sends more StreamItems than it has credit for, and Credit frames (id = stream id) grant more. A Credit's amount is at least 1.
   - A download's StreamOpen carries the client's initial credit, in items. The client grants more as the application takes items, about every half of its buffer.
   - An upload starts with no credit. The server grants it as its handler reads.
 - **Server events** have no window. The browser WebSocket API cannot slow the network down: it queues messages for the page as fast as they arrive. So the server watches acknowledgements instead (see below) and applies its slow-consumer policy.
