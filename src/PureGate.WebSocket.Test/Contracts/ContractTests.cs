@@ -49,6 +49,16 @@ public sealed class ContractTests
   }
 
   [Test]
+  public async Task HashesAnUploadsItemType()
+  {
+    var numbers = await SampleContractAsync(map: ws => ws.MapUpload<int, int>("extra.put", static (_, _, _) => ValueTask.FromResult(0)));
+    var texts = await SampleContractAsync(map: ws => ws.MapUpload<string, int>("extra.put", static (_, _, _) => ValueTask.FromResult(0)));
+
+    Assert.That(texts.Hash, Is.Not.EqualTo(numbers.Hash));
+    Assert.That(numbers.TypeScript, Does.Contain("put(item: number): number;"));
+  }
+
+  [Test]
   public async Task DescribesReferenceTypesThatCanBeNullWhenAsked()
   {
     var contract = await SampleContractAsync(options => options.Contract.ReferenceTypesCanBeNull = true);

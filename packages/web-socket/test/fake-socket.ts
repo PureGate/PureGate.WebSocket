@@ -63,6 +63,7 @@ export class FakeSocket {
         connection: "c1",
         session: "s",
         calls: 8,
+        streams: 4,
         events: 16,
         maxMessage: 65536,
         heartbeat: 15000,

@@ -185,6 +185,10 @@ sealed class EndpointState
     {
       if (operation.Kind == OperationKind.Request)
         members.Add(new(Section: "api", operation.Name, operation.RequestType, operation.ResponseType));
+      else if (operation.Kind == OperationKind.Stream)
+        members.Add(new(Section: "streams", operation.Name, operation.RequestType, operation.ResponseType));
+      else if (operation is IUploadOperation upload)
+        members.Add(new(Section: "uploads", operation.Name, operation.RequestType, operation.ResponseType, upload.ItemType));
       else if (operation.Kind == OperationKind.ClientEvent)
         members.Add(new(Section: "clientEvents", operation.Name, operation.RequestType, operation.ResponseType));
     }

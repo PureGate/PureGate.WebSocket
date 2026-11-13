@@ -25,6 +25,36 @@ export interface CallOptions {
   readonly signal?: AbortSignal;
 }
 
+/** Options for one stream. */
+export interface StreamOptions {
+  /** Aborting it cancels the stream, on the server too, and the iterator throws cancelled. */
+  readonly signal?: AbortSignal;
+  /** Items that may wait in the browser before the server must stop. ConnectOptions.streamBuffer by default. */
+  readonly buffer?: number;
+}
+
+/** Options for one upload. Uploads have no deadline unless they set one. */
+export interface UploadOptions {
+  /** Milliseconds until the upload is cancelled. */
+  readonly timeout?: number;
+  /** Aborting it cancels the upload, on the server too. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Items from the server, read with for await. The stream opens on the first read. Leaving the loop early, return()
+ * and cancel() stop it on the server too; a failed stream throws its CallError once the items before it are read.
+ */
+export interface CallStream<T> extends AsyncIterableIterator<T, undefined> {
+  /** Stops the stream, as leaving a for await loop does. */
+  return(): Promise<IteratorResult<T, undefined>>;
+  /** Stops the stream. The next read finishes the iteration. */
+  cancel(): void;
+}
+
+/** What an upload reads its items from. The source is read only as fast as the server takes items. */
+export type UploadSource<T> = AsyncIterable<T> | Iterable<T> | ReadableStream<T>;
+
 /** What a browser-side handler gets besides the payload. */
 export interface HandlerContext {
   /** Aborts when the server cancels the call, its deadline passes, or the connection closes. */
@@ -48,6 +78,34 @@ export type ApiOf<G> = {
     : G[K] extends (request: infer Q) => infer R
       ? (request: Q, options?: CallOptions) => Promise<Awaited<R>>
       : ApiOf<G[K]>;
+};
+
+/** Without a request, the options still need a place: streams.prices.all() or streams.prices.all(undefined, { buffer }). */
+export interface NoRequestStream<T> {
+  (): CallStream<T>;
+  (request: undefined, options: StreamOptions): CallStream<T>;
+}
+
+/** conn.streams.prices.watch(request, options?), from the streams section. The leaf's return type is the item type. */
+export type StreamOf<G> = {
+  readonly [K in keyof G]: G[K] extends () => infer T
+    ? NoRequestStream<Awaited<T>>
+    : G[K] extends (request: infer Q) => infer T
+      ? (request: Q, options?: StreamOptions) => CallStream<Awaited<T>>
+      : StreamOf<G[K]>;
+};
+
+/**
+ * conn.uploads.files.put(request, source, options?), or put(source, options?) without a request, from the uploads
+ * section. The leaf's last parameter is the item type. The one-parameter form is checked first: a two-parameter leaf
+ * doesn't match it.
+ */
+export type UploadOf<G> = {
+  readonly [K in keyof G]: G[K] extends (item: infer T) => infer R
+    ? (source: UploadSource<T>, options?: UploadOptions) => Promise<Awaited<R>>
+    : G[K] extends (request: infer Q, item: infer T) => infer R
+      ? (request: Q, source: UploadSource<T>, options?: UploadOptions) => Promise<Awaited<R>>
+      : UploadOf<G[K]>;
 };
 
 /** conn.on.orders.shipped(listener), from the events section. Returns a function that stops listening. */
@@ -80,15 +138,21 @@ export interface StateChange {
   readonly reason?: string;
 }
 
-/** The calls of a connection with default options, from conn.with(options). */
+/** The calls and streams of a connection with default options, from conn.with(options). */
 export interface CallView<C extends ContractShape> {
   readonly api: ApiOf<Section<C, "api">>;
+  /** Streams take the view's signal. */
+  readonly streams: StreamOf<Section<C, "streams">>;
 }
 
 /** A connection to a PureGate.WebSocket endpoint, typed by its contract. */
 export interface Connection<C extends ContractShape = ContractShape> {
   /** Operations on the server: conn.api.orders.get(42, { timeout }). */
   readonly api: ApiOf<Section<C, "api">>;
+  /** Streams from the server: for await (const tick of conn.streams.prices.watch("MSFT")). */
+  readonly streams: StreamOf<Section<C, "streams">>;
+  /** Streams to the server: await conn.uploads.files.put(request, file.stream()). */
+  readonly uploads: UploadOf<Section<C, "uploads">>;
   /** Listens to the server's events: conn.on.orders.shipped(listener). */
   readonly on: OnOf<Section<C, "events">>;
   /** Sends events to the server: conn.emit.telemetry.click(event). */
@@ -117,6 +181,8 @@ export interface ConnectOptions {
   readonly token?: () => string | Promise<string>;
   /** Default milliseconds a call waits. 30,000. */
   readonly timeout?: number;
+  /** Items a stream may have waiting in the browser before the server must stop. 16. */
+  readonly streamBuffer?: number;
   /** Calls and events that may wait for the connection or a window. 256. */
   readonly maxQueued?: number;
   /** The largest message the browser accepts, in bytes, at least 16 KiB. 16 MiB. */

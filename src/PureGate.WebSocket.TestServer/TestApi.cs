@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -47,6 +48,8 @@ public static class TestApi
     options.AllowedOrigins = ["*"];
     options.MaxConcurrentCalls = 8;
     options.EventWindow = 16;
+    options.MaxStreams = 4;
+    options.UploadWindow = 4;
   }
 
   public static void Map(WebSocketEndpointBuilder ws)
@@ -156,6 +159,9 @@ public static class TestApi
         return [.. state.Clicks];
     });
 
+    MapStreams(ws.MapGroup("feed"));
+    MapUploads(ws.MapGroup("store"));
+
     var browser = ws.MapGroup("browser");
     browser.MapRequest<string, string>("confirm", static async (text, call, cancellationToken) =>
     {
@@ -181,6 +187,161 @@ public static class TestApi
     });
   }
 
+  // Streams the browser reads: conn.streams.feed.*.
+  static void MapStreams(WebSocketGroup feed)
+  {
+    feed.MapStream<int, int>("count", static (count, call, cancellationToken) => Count(count, cancellationToken));
+    feed.MapStream<Note>("notes", static (call, cancellationToken) => Notes(State(call), cancellationToken));
+    feed.MapStream<int, byte[]>("bytes", static (count, call, cancellationToken) => Bytes(count, cancellationToken));
+    feed.MapStream<int, int>("fail", static (after, call, cancellationToken) => Fail(after, cancellationToken));
+    feed.MapStream<int>("crash", static (call, cancellationToken) => Crash(cancellationToken));
+    feed.MapStream<int, string>("huge", static (length, call, cancellationToken) => Huge(length, cancellationToken));
+    feed.MapRequest<int>("produced", static (call, cancellationToken) => ValueTask.FromResult(Volatile.Read(ref State(call).Produced)));
+    feed.MapRequest<int>("cancelled", static (call, cancellationToken) => ValueTask.FromResult(Volatile.Read(ref State(call).StreamsCancelled)));
+  }
+
+  static async IAsyncEnumerable<int> Count(int count, [EnumeratorCancellation] CancellationToken cancellationToken)
+  {
+    for (var i = 1; i <= count; i++)
+    {
+      await Task.Yield();
+      yield return i;
+    }
+  }
+
+  // Never ends: the browser stops it. Counts what it produced, which credit holds back.
+  static async IAsyncEnumerable<Note> Notes(ConnectionState state, [EnumeratorCancellation] CancellationToken cancellationToken)
+  {
+    try
+    {
+      for (var i = 1; ; i++)
+      {
+        await Task.Yield();
+        cancellationToken.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref state.Produced);
+        yield return new Note("tick", i);
+      }
+    }
+    finally
+    {
+      if (cancellationToken.IsCancellationRequested)
+        Interlocked.Increment(ref state.StreamsCancelled);
+    }
+  }
+
+  static async IAsyncEnumerable<byte[]> Bytes(int count, [EnumeratorCancellation] CancellationToken cancellationToken)
+  {
+    for (var i = 0; i < count; i++)
+    {
+      await Task.Yield();
+      yield return [(byte)i, (byte)i, (byte)i];
+    }
+  }
+
+  static async IAsyncEnumerable<int> Fail(int after, [EnumeratorCancellation] CancellationToken cancellationToken)
+  {
+    for (var i = 1; i <= after; i++)
+    {
+      await Task.Yield();
+      yield return i;
+    }
+
+    throw new CallException("broken", "The feed broke.", new ErrorDetails(after));
+  }
+
+  static async IAsyncEnumerable<int> Crash([EnumeratorCancellation] CancellationToken cancellationToken)
+  {
+    await Task.Yield();
+    throw new InvalidOperationException("A secret the browser must not see.");
+#pragma warning disable CS0162 // An iterator needs a yield, even one it never reaches.
+    yield break;
+#pragma warning restore CS0162
+  }
+
+  static async IAsyncEnumerable<string> Huge(int length, [EnumeratorCancellation] CancellationToken cancellationToken)
+  {
+    await Task.Yield();
+    yield return "first";
+    yield return new string('x', length);
+  }
+
+  // Streams the browser sends: conn.uploads.store.*.
+  static void MapUploads(WebSocketGroup store)
+  {
+    store.MapUpload<int, int>("sum", static async (items, call, cancellationToken) =>
+    {
+      var sum = 0;
+      await foreach (var item in items)
+        sum += item;
+      return sum;
+    });
+    store.MapUpload<string, string, string>("join", static async (separator, items, call, cancellationToken) =>
+    {
+      var parts = new List<string>();
+      await foreach (var item in items)
+        parts.Add(item);
+      return string.Join(separator, parts);
+    });
+    store.MapUpload<byte[], int>("size", static async (items, call, cancellationToken) =>
+    {
+      var size = 0;
+      await foreach (var item in items)
+        size += item.Length;
+      return size;
+    });
+
+    // Answers before the browser has sent everything.
+    store.MapUpload<int, int>("first", static async (items, call, cancellationToken) =>
+    {
+      await foreach (var item in items)
+        return item;
+      return -1;
+    });
+    store.MapUpload<int, int, int>("fail", static async (after, items, call, cancellationToken) =>
+    {
+      var read = 0;
+      await foreach (var item in items)
+      {
+        if (++read == after)
+          throw new CallException("rejected", $"Item {item} was refused.", new ErrorDetails(item));
+      }
+
+      return read;
+    });
+
+    // Reads until the browser gives up.
+    store.MapUpload<int, int>("hold", static async (items, call, cancellationToken) =>
+    {
+      try
+      {
+        var read = 0;
+        await foreach (var item in items)
+          read++;
+        await Task.Delay(Timeout.Infinite, cancellationToken);
+        return read;
+      }
+      catch (OperationCanceledException)
+      {
+        Interlocked.Increment(ref State(call).UploadsCancelled);
+        throw;
+      }
+    });
+    store.MapUpload<string, Note>("count", static async (tag, items, call, cancellationToken) =>
+    {
+      var count = 0;
+      await foreach (var note in items)
+        count++;
+      State(call).Counted = $"{tag}:{count}";
+    });
+    store.MapUpload<string>("drain", static async (items, call, cancellationToken) =>
+    {
+      await foreach (var item in items)
+        State(call).Counted = item;
+    });
+    store.MapRequest<string>("counted", static (call, cancellationToken) => ValueTask.FromResult(State(call).Counted ?? ""));
+    store.MapRequest<int>("cancelled", static (call, cancellationToken) => ValueTask.FromResult(Volatile.Read(ref State(call).UploadsCancelled)));
+  }
+
   static ConnectionState State(WebSocketCall call) =>
     (ConnectionState)((ConcurrentDictionary<object, object>)call.Connection.Items).GetOrAdd(typeof(ConnectionState), static _ => new ConnectionState());
 
@@ -191,5 +352,9 @@ public static class TestApi
     public int Peak;
     public TaskCompletionSource Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public readonly List<Click> Clicks = [];
+    public int Produced;
+    public int StreamsCancelled;
+    public int UploadsCancelled;
+    public string Counted;
   }
 }

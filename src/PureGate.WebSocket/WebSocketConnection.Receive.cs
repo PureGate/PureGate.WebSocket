@@ -170,7 +170,7 @@ public sealed partial class WebSocketConnection
       Connection = Id,
       Session = NewId(16),
       Calls = Options.MaxConcurrentCalls,
-      Streams = 1,
+      Streams = Options.MaxStreams,
       Events = Options.EventWindow,
       MaxMessage = Options.MaxMessageBytes,
       Heartbeat = (long)Options.Heartbeat.TotalMilliseconds,
@@ -207,6 +207,18 @@ public sealed partial class WebSocketConnection
           break;
         case FrameKind.Event:
           OnEvent(in frame);
+          break;
+        case FrameKind.StreamOpen:
+          OnStreamOpen(in frame);
+          break;
+        case FrameKind.StreamItem:
+          OnStreamItem(in frame);
+          break;
+        case FrameKind.StreamEnd:
+          OnStreamEnd(in frame);
+          break;
+        case FrameKind.Credit:
+          OnCredit(in frame);
           break;
         case FrameKind.Cancel:
           OnCancel(frame.Id);
@@ -282,6 +294,7 @@ public sealed partial class WebSocketConnection
 
     await SessionCancellation.CancelAsync();
     FailInvokes();
+    FinishStreams();
     if (Connected)
     {
       Endpoint.Hub.Remove(this);

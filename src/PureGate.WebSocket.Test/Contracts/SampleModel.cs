@@ -96,6 +96,10 @@ namespace PureGate.WebSocket.Test.Contracts
       ws.MapRequest<int, byte[]>("shop.files.download", static (_, _, _) => throw new NotSupportedException());
       ws.MapRequest<byte[]>("shop.files.upload", static (_, _, _) => ValueTask.CompletedTask);
       ws.MapRequest("ping", static (_, _) => ValueTask.CompletedTask);
+      orders.MapStream<int, Order>("watch", static (_, _, _) => throw new NotSupportedException());
+      ws.MapStream<Line>("ui.lines", static (_, _) => throw new NotSupportedException());
+      ws.MapUpload<Order, byte[], int>("shop.files.put", static (_, _, _, _) => throw new NotSupportedException());
+      ws.MapUpload<Line, int>("ui.lines.count", static (_, _, _) => throw new NotSupportedException());
       ws.MapClientEvent<Line>("ui.clicked", static (_, _, _) => ValueTask.CompletedTask);
     }
 

@@ -77,6 +77,94 @@ public abstract class WebSocketBuilder
       }));
   }
 
+  // A stream the browser opens and reads. The handler's items are pulled only as fast as the browser takes them, and
+  // its token fires when the browser stops reading.
+  public OperationBuilder MapStream<TRequest, TItem>(
+      string name,
+      Func<TRequest, WebSocketCall, CancellationToken, IAsyncEnumerable<TItem>> handler)
+  {
+    ArgumentNullException.ThrowIfNull(handler);
+    return Add(new StreamOperation<TRequest, TItem>(FullName(name), Codec<TRequest>(), Codec<TItem>(), handler));
+  }
+
+  // A stream without a request, such as "prices.all".
+  public OperationBuilder MapStream<TItem>(
+      string name,
+      Func<WebSocketCall, CancellationToken, IAsyncEnumerable<TItem>> handler)
+  {
+    ArgumentNullException.ThrowIfNull(handler);
+    return Add(new StreamOperation<NoPayload, TItem>(
+      FullName(name),
+      Codec<NoPayload>(),
+      Codec<TItem>(),
+      (_, call, cancellationToken) => handler(call, cancellationToken)));
+  }
+
+  // A stream the browser sends. The handler reads its items, which arrive only as fast as it takes them, and returns
+  // the browser's result.
+  public OperationBuilder MapUpload<TRequest, TItem, TResponse>(
+      string name,
+      Func<TRequest, IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask<TResponse>> handler)
+  {
+    ArgumentNullException.ThrowIfNull(handler);
+    return Add(new UploadOperation<TRequest, TItem, TResponse>(
+      FullName(name),
+      Codec<TRequest>(),
+      Codec<TItem>(),
+      Codec<TResponse>(),
+      handler));
+  }
+
+  // An upload without a request.
+  public OperationBuilder MapUpload<TItem, TResponse>(
+      string name,
+      Func<IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask<TResponse>> handler)
+  {
+    ArgumentNullException.ThrowIfNull(handler);
+    return Add(new UploadOperation<NoPayload, TItem, TResponse>(
+      FullName(name),
+      Codec<NoPayload>(),
+      Codec<TItem>(),
+      Codec<TResponse>(),
+      (_, items, call, cancellationToken) => handler(items, call, cancellationToken)));
+  }
+
+  // An upload without a result: the browser's upload completes when the handler does.
+  public OperationBuilder MapUpload<TRequest, TItem>(
+      string name,
+      Func<TRequest, IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask> handler)
+  {
+    ArgumentNullException.ThrowIfNull(handler);
+    return Add(new UploadOperation<TRequest, TItem, NoPayload>(
+      FullName(name),
+      Codec<TRequest>(),
+      Codec<TItem>(),
+      Codec<NoPayload>(),
+      async (request, items, call, cancellationToken) =>
+      {
+        await handler(request, items, call, cancellationToken);
+        return default;
+      }));
+  }
+
+  // An upload with neither a request nor a result.
+  public OperationBuilder MapUpload<TItem>(
+      string name,
+      Func<IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask> handler)
+  {
+    ArgumentNullException.ThrowIfNull(handler);
+    return Add(new UploadOperation<NoPayload, TItem, NoPayload>(
+      FullName(name),
+      Codec<NoPayload>(),
+      Codec<TItem>(),
+      Codec<NoPayload>(),
+      async (_, items, call, cancellationToken) =>
+      {
+        await handler(items, call, cancellationToken);
+        return default;
+      }));
+  }
+
   // An event the browser sends. Events from one connection are handled in order (PureGateWebSocketOptions.EventOrdering).
   public OperationBuilder MapClientEvent<T>(string name, Func<T, WebSocketCall, CancellationToken, ValueTask> handler)
   {

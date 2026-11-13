@@ -20,6 +20,13 @@ public sealed class PureGateWebSocketOptions
   // How many events from one client may wait for a handler, at least 16.
   public int EventWindow { get; set; } = 256;
 
+  // How many streams one client may have open at once, downloads and uploads together, at least 1.
+  public int MaxStreams { get; set; } = 8;
+
+  // How many items of an upload may be on the way to its handler, at least 2. The server grants this much credit
+  // when the handler starts, and more each time the handler has read half of it.
+  public int UploadWindow { get; set; } = 16;
+
   // How long a new connection has to send its Hello.
   public TimeSpan HandshakeTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
@@ -69,6 +76,8 @@ public sealed class PureGateWebSocketOptions
     MaxMessageBytes = MaxMessageBytes,
     MaxConcurrentCalls = MaxConcurrentCalls,
     EventWindow = EventWindow,
+    MaxStreams = MaxStreams,
+    UploadWindow = UploadWindow,
     HandshakeTimeout = HandshakeTimeout,
     Heartbeat = Heartbeat,
     KeepAliveInterval = KeepAliveInterval,
@@ -94,6 +103,8 @@ public sealed class PureGateWebSocketOptions
     ArgumentOutOfRangeException.ThrowIfLessThan(MaxMessageBytes, 16 * 1024, nameof(MaxMessageBytes));
     ArgumentOutOfRangeException.ThrowIfLessThan(MaxConcurrentCalls, 4, nameof(MaxConcurrentCalls));
     ArgumentOutOfRangeException.ThrowIfLessThan(EventWindow, 16, nameof(EventWindow));
+    ArgumentOutOfRangeException.ThrowIfLessThan(MaxStreams, 1, nameof(MaxStreams));
+    ArgumentOutOfRangeException.ThrowIfLessThan(UploadWindow, 2, nameof(UploadWindow));
     ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(HandshakeTimeout, TimeSpan.Zero, nameof(HandshakeTimeout));
     ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(Heartbeat, TimeSpan.Zero, nameof(Heartbeat));
     ArgumentOutOfRangeException.ThrowIfLessThan(SendQueueLimitBytes, MaxMessageBytes, nameof(SendQueueLimitBytes));

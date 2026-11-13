@@ -175,7 +175,7 @@ The mapped types are homomorphic (`[K in keyof G]`), so the editor links each pa
 
 **Streams.** A stream opens on the first `next()`, so a stream that is never read costs nothing. Its credit is the buffer size, and half the buffer is granted again each time the application takes that many items. `break`, `return`, `cancel()` and an aborted signal send Cancel. A failed StreamEnd is thrown from the iterator as `CallError`.
 
-**Uploads.** The client reads from the source only as the server grants credit, so a large file is never read ahead of the server's handler. When the source ends, the client sends StreamEnd; when the source throws, a failed StreamEnd. Aborting the signal sends Cancel. The promise settles with the server's Response, and a Response that arrives before the source ends stops the reading.
+**Uploads.** The client reads from the source only as the server grants credit, so a large file is never read ahead of the server's handler. When the source ends, the client sends StreamEnd; when the source throws, a failed StreamEnd. Aborting the signal sends Cancel. The promise settles with the server's Response, and a Response that arrives before the source ends stops the reading. An upload has no deadline unless its options set one, since the default call timeout would cut large files off.
 
 **Events.** Listeners run synchronously, in arrival order. A listener that throws is reported to `onError` and does not stop the others. Events nobody listens to are dropped, and still acknowledged. `emit` queues while the connection isn't open or the event window is full.
 

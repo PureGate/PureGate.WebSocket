@@ -8,8 +8,9 @@ using PureGate.WebSocket.Serialization;
 
 namespace PureGate.WebSocket.Contracts;
 
-// One operation, stream or event in the contract.
-readonly record struct ContractMember(string Section, string Name, Type Request, Type Response);
+// One operation, stream or event in the contract. A stream's Response is its item type; an upload has an Item type
+// besides its Request and Response, and the others have none.
+readonly record struct ContractMember(string Section, string Name, Type Request, Type Response, Type Item = null);
 
 // Writes an endpoint's members as TypeScript (docs/PLAN-SERVER.md, Contract generation). JsonSchemaExporter describes
 // each type from the serializer's own metadata; a transform marks the object types, which become named interfaces.
@@ -63,7 +64,9 @@ sealed class ContractGenerator
   WebSocketContract Run(string route, ContractMember[] members)
   {
     // Every payload's schema first: exporting them is what finds the named types.
-    var payloads = members.Select(member => (Request: Export(member.Request), Response: Export(member.Response))).ToArray();
+    var payloads = members
+      .Select(member => (Request: Export(member.Request), Response: Export(member.Response), Item: member.Item is null ? null : Export(member.Item)))
+      .ToArray();
     Names = AssignNames();
 
     var hash = Hash(members, payloads);
@@ -364,7 +367,7 @@ sealed class ContractGenerator
       ? name
       : JsonSerializer.Serialize(name, HandshakeJson.Default.String);
 
-  void WriteContract(StringBuilder typeScript, ContractMember[] members, (JsonNode Request, JsonNode Response)[] payloads)
+  void WriteContract(StringBuilder typeScript, ContractMember[] members, (JsonNode Request, JsonNode Response, JsonNode Item)[] payloads)
   {
     typeScript.Append("export interface Contract {\n");
     foreach (var section in Sections)
@@ -383,13 +386,18 @@ sealed class ContractGenerator
     typeScript.Append("}\n");
   }
 
-  string Signature(ContractMember member, (JsonNode Request, JsonNode Response) payload)
+  string Signature(ContractMember member, (JsonNode Request, JsonNode Response, JsonNode Item) payload)
   {
     var leaf = member.Name[(member.Name.LastIndexOf('.') + 1)..];
     var isEvent = member.Section is "events" or "clientEvents";
-    var parameter = member.Request == typeof(NoPayload) ? "" : $"{(isEvent ? "event" : "request")}: {PayloadType(member.Request, payload.Request)}";
+    var parameters = new List<string>(2);
+    if (member.Request != typeof(NoPayload))
+      parameters.Add($"{(isEvent ? "event" : "request")}: {PayloadType(member.Request, payload.Request)}");
+    if (member.Item is not null)
+      parameters.Add($"item: {PayloadType(member.Item, payload.Item)}");
+
     var result = isEvent ? "void" : PayloadType(member.Response, payload.Response);
-    return $"{leaf}({parameter}): {result};";
+    return $"{leaf}({string.Join(", ", parameters)}): {result};";
   }
 
   string PayloadType(Type type, JsonNode schema) =>
@@ -399,15 +407,19 @@ sealed class ContractGenerator
 
   // A hash of what the contract means: every member's payload schemas and every named type's schema, in a
   // canonical form with sorted keys and named types referred to by their TypeScript names.
-  string Hash(ContractMember[] members, (JsonNode Request, JsonNode Response)[] payloads)
+  string Hash(ContractMember[] members, (JsonNode Request, JsonNode Response, JsonNode Item)[] payloads)
   {
     var model = new JsonObject();
     var memberModels = new JsonObject();
     for (var i = 0; i < members.Length; i++)
     {
-      memberModels[$"{members[i].Section}:{members[i].Name}"] = new JsonArray(
+      var member = new JsonArray(
         CanonicalPayload(members[i].Request, payloads[i].Request),
         CanonicalPayload(members[i].Response, payloads[i].Response));
+      if (members[i].Item is not null)
+        member.Add(CanonicalPayload(members[i].Item, payloads[i].Item));
+
+      memberModels[$"{members[i].Section}:{members[i].Name}"] = member;
     }
 
     var types = new JsonObject();

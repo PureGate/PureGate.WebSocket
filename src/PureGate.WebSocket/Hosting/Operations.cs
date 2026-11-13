@@ -8,6 +8,8 @@ enum OperationKind
   Unknown,
   Request,
   ClientEvent,
+  Stream,
+  Upload,
 }
 
 // Something a browser can call or send by name. Start runs on the receive loop: it reads the payload while the
@@ -146,6 +148,146 @@ sealed class ClientEventOperation<T>(
       }
     }
   }
+}
+
+// A stream the browser opens and the server produces. The producer is pulled only as fast as the browser grants
+// credit: each item waits for credit before the enumerator moves to it.
+sealed class StreamOperation<TRequest, TItem>(
+    string name,
+    PayloadCodec<TRequest> request,
+    PayloadCodec<TItem> item,
+    Func<TRequest, WebSocketCall, CancellationToken, IAsyncEnumerable<TItem>> handler)
+  : Operation(name, OperationKind.Stream)
+{
+  public PayloadCodec<TItem> Item { get; } = item;
+
+  Func<TRequest, WebSocketCall, CancellationToken, IAsyncEnumerable<TItem>> Handler { get; } = handler;
+
+  public override Type RequestType => typeof(TRequest);
+
+  // For the contract, a stream's result is its item type.
+  public override Type ResponseType => typeof(TItem);
+
+  public override void Start(WebSocketConnection connection, scoped in Frame frame)
+  {
+    TRequest value;
+    try
+    {
+      value = request.Read(frame.Payload, frame.Has(FrameFlags.Binary));
+    }
+    catch (InvalidPayloadException exception)
+    {
+      connection.RejectStream(in frame, ErrorCode.InvalidPayload, exception.Message);
+      return;
+    }
+
+    var stream = connection.BeginDownload(this, in frame);
+    ThreadPool.UnsafeQueueUserWorkItem(new Run(this, connection, stream, value), preferLocal: false);
+  }
+
+  sealed class Run(
+      StreamOperation<TRequest, TItem> operation,
+      WebSocketConnection connection,
+      DownloadState stream,
+      TRequest value) : IThreadPoolWorkItem
+  {
+    public void Execute() => _ = RunAsync();
+
+    async Task RunAsync()
+    {
+      Exception failure = null;
+      var token = stream.Call.CancellationToken;
+      try
+      {
+        await using var items = operation.Handler(value, stream.Call, token).GetAsyncEnumerator(token);
+        while (true)
+        {
+          await stream.WaitForCreditAsync(token);
+          if (!await items.MoveNextAsync())
+            break;
+
+          if (!connection.WriteStreamItem(stream, operation.Item, items.Current))
+            break;
+        }
+      }
+      catch (Exception exception)
+      {
+        failure = exception;
+      }
+
+      await connection.EndDownloadAsync(stream, failure);
+    }
+  }
+}
+
+// A stream the browser sends, read by a handler that returns one result.
+sealed class UploadOperation<TRequest, TItem, TResponse>(
+    string name,
+    PayloadCodec<TRequest> request,
+    PayloadCodec<TItem> item,
+    PayloadCodec<TResponse> response,
+    Func<TRequest, IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask<TResponse>> handler)
+  : Operation(name, OperationKind.Upload), IUploadOperation
+{
+  public PayloadCodec<TResponse> Response { get; } = response;
+
+  Func<TRequest, IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask<TResponse>> Handler { get; } = handler;
+
+  public override Type RequestType => typeof(TRequest);
+
+  public override Type ResponseType => typeof(TResponse);
+
+  public Type ItemType => typeof(TItem);
+
+  public override void Start(WebSocketConnection connection, scoped in Frame frame)
+  {
+    TRequest value;
+    try
+    {
+      value = request.Read(frame.Payload, frame.Has(FrameFlags.Binary));
+    }
+    catch (InvalidPayloadException exception)
+    {
+      connection.RejectStream(in frame, ErrorCode.InvalidPayload, exception.Message);
+      return;
+    }
+
+    var upload = connection.BeginUpload(this, in frame, item);
+    ThreadPool.UnsafeQueueUserWorkItem(new Run(this, connection, upload, value), preferLocal: false);
+  }
+
+  sealed class Run(
+      UploadOperation<TRequest, TItem, TResponse> operation,
+      WebSocketConnection connection,
+      UploadState<TItem> upload,
+      TRequest value) : IThreadPoolWorkItem
+  {
+    public void Execute() => _ = RunAsync();
+
+    async Task RunAsync()
+    {
+      var token = upload.Call.CancellationToken;
+      connection.GrantUploadCredit(upload, (uint)connection.Options.UploadWindow);
+      TResponse result;
+      try
+      {
+        result = await operation.Handler(value, upload.ReadAsync(token), upload.Call, token);
+      }
+      catch (Exception exception)
+      {
+        await connection.FailUploadAsync(upload, exception);
+        return;
+      }
+
+      await connection.CompleteUploadAsync(upload, operation.Response, result);
+    }
+  }
+}
+
+// What the contract needs to know of an upload besides its request and result.
+interface IUploadOperation
+{
+  Type ItemType { get; }
 }
 
 // One event waiting for, or running in, its handler.

@@ -173,7 +173,7 @@ A Hello that fails closes the connection with the matching close code (see [Clos
 
 Before Welcome arrives, the client may use 4 calls, 1 stream and 16 events, and messages of up to 16,384 bytes: the minimums every server advertises.
 
-A frame that is well formed but breaks the session's rules is a protocol error too: one past a window, a Request or StreamOpen whose id is still in use, and a Response, StreamItem, StreamEnd or Credit for an exchange that doesn't exist. A Cancel for an exchange that already ended is not an error, since it may cross the exchange's end on the wire, and is ignored.
+A frame that is well formed but breaks the session's rules is a protocol error too: one past a window, a Request or StreamOpen whose id is still in use, and a Response, StreamItem or StreamEnd for an exchange that doesn't exist. A Cancel or a Credit for an exchange that already ended is not an error, since it may cross the exchange's end on the wire, and is ignored.
 
 ## Re-authentication
 
@@ -194,7 +194,7 @@ The client opens every stream with StreamOpen, so a stream's id is always the cl
   - After a Cancel from the client, the server ends the stream with a StreamEnd that fails with `cancelled`.
 - **Upload** (Upload flag set): the client produces the items.
   - StreamOpen carries the request payload, and its `credit` field must be 0. The server grants credit as its handler reads, starting when the handler begins.
-  - The client sends StreamItems within credit, then ends with StreamEnd (a failed one if its source failed), or gives up with Cancel.
+  - The client sends StreamItems within credit, then ends with StreamEnd (a failed one if its source failed), or gives up with Cancel. A Cancel after its StreamEnd still cancels the handler, since the upload lasts until the Response.
   - The server answers with exactly one Response, the handler's result. If the handler finishes before the client's StreamEnd, the Response comes first: the client then stops and sends StreamEnd, and the server discards items already on the way.
 
 ## Flow control

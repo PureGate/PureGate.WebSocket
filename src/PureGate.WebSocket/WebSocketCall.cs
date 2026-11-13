@@ -75,10 +75,17 @@ public sealed class WebSocketCall : IAsyncDisposable
     Cancellation.CancelAfter(TimeSpan.FromMilliseconds(milliseconds));
   }
 
+  // The browser's Cancel can cross the handler's end, when the call is already disposed.
   internal void CancelByClient()
   {
     CancelledByClient = true;
-    _ = Cancellation.CancelAsync();
+    try
+    {
+      _ = Cancellation.CancelAsync();
+    }
+    catch (ObjectDisposedException)
+    {
+    }
   }
 
   public async ValueTask DisposeAsync()

@@ -16,6 +16,8 @@ sealed class Outgoing
   public string Name;
   public uint Timeout;
   public string Trace;
+  public uint Credit;
+  public uint Amount;
   public ErrorCode ErrorCode;
   public string ErrorCustom;
   public string ErrorMessage;
@@ -40,6 +42,20 @@ sealed class Outgoing
 
   public static Outgoing Cancel(uint id) => new() { Kind = FrameKind.Cancel, Id = id };
 
+  // A download's StreamOpen, with the client's initial credit.
+  public static Outgoing Download(uint id, string name, uint credit, string json = null) =>
+    new() { Kind = FrameKind.StreamOpen, Id = id, Name = name, Credit = credit, Payload = Utf8(json) };
+
+  // An upload's StreamOpen: the server grants its credit.
+  public static Outgoing Upload(uint id, string name, string json = null) =>
+    new() { Kind = FrameKind.StreamOpen, Flags = FrameFlags.Upload, Id = id, Name = name, Payload = Utf8(json) };
+
+  public static Outgoing Item(uint id, string json) => new() { Kind = FrameKind.StreamItem, Id = id, Payload = Utf8(json) };
+
+  public static Outgoing End(uint id) => new() { Kind = FrameKind.StreamEnd, Id = id };
+
+  public static Outgoing Grant(uint id, uint amount) => new() { Kind = FrameKind.Credit, Id = id, Amount = amount };
+
   public void WriteTo(IBufferWriter<byte> output)
   {
     var frame = new Frame
@@ -51,6 +67,8 @@ sealed class Outgoing
       NameText = Name is null ? default : Encoding.ASCII.GetBytes(Name),
       Timeout = Timeout,
       Trace = Trace is null ? default : Encoding.ASCII.GetBytes(Trace),
+      Credit = Credit,
+      Amount = Amount,
       ErrorCode = ErrorCode,
       ErrorCustom = ErrorCustom is null ? default : Encoding.ASCII.GetBytes(ErrorCustom),
       ErrorMessage = Encoding.UTF8.GetBytes(ErrorMessage ?? ""),

@@ -2,6 +2,7 @@ export { connect } from "./connection.ts";
 export type {
   ApiOf,
   CallOptions,
+  CallStream,
   CallView,
   Connection,
   ConnectionState,
@@ -11,8 +12,14 @@ export type {
   HandleOf,
   HandlerContext,
   NoRequest,
+  NoRequestStream,
   OnOf,
   StateChange,
+  StreamOf,
+  StreamOptions,
+  UploadOf,
+  UploadOptions,
+  UploadSource,
   WebSocketConstructor,
 } from "./contract.ts";
 export { CallError } from "./errors.ts";

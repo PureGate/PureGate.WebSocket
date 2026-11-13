@@ -31,7 +31,7 @@ public sealed partial class WebSocketConnection
     {
       if (ActiveCalls.Count >= Options.MaxConcurrentCalls)
         ProtocolException.Throw(ProtocolViolation.WindowExceeded);
-      if (ActiveCalls.ContainsKey(frame.Id))
+      if (IsInUse(frame.Id))
         ProtocolException.Throw(ProtocolViolation.DuplicateId);
     }
 
@@ -49,10 +49,16 @@ public sealed partial class WebSocketConnection
   {
     WebSocketCall call;
     lock (CallsGate)
-      ActiveCalls.TryGetValue(id, out call);
+    {
+      if (!ActiveCalls.TryGetValue(id, out call) && Downloads.TryGetValue(id, out var stream))
+        call = stream.Call;
+    }
 
-    // A Cancel for a call that already ended crossed its Response on the wire.
-    call?.CancelByClient();
+    // A Cancel for an exchange that already ended crossed its end on the wire.
+    if (call is not null)
+      call.CancelByClient();
+    else
+      CancelUpload(id);
   }
 
   internal WebSocketCall BeginCall(Operation operation, scoped in Frame frame)
@@ -87,18 +93,9 @@ public sealed partial class WebSocketConnection
     EndCall(call);
     var outcome = GetOutcome(call);
     if (outcome != CallOutcome.Completed)
-    {
       SendOutcome(call.Id, outcome);
-    }
-    else if (exception is CallException failure)
-    {
-      SendCallException(call.Id, failure);
-    }
     else
-    {
-      Log.HandlerFailed(Logger, Id, call.Name, exception);
-      SendError(call.Id, ErrorCode.HandlerFailed, default, Options.IncludeExceptionDetails ? exception.Message : GenericFailure, default);
-    }
+      SendFailure(call, exception, FrameKind.Response);
 
     await call.DisposeAsync();
   }
@@ -118,12 +115,12 @@ public sealed partial class WebSocketConnection
     : call.DeadlinePassed ? CallOutcome.TimedOut
     : CallOutcome.Completed;
 
-  void SendOutcome(uint id, CallOutcome outcome)
+  void SendOutcome(uint id, CallOutcome outcome, FrameKind kind = FrameKind.Response)
   {
     if (outcome == CallOutcome.Cancelled)
-      SendError(id, ErrorCode.Cancelled, default, "The call was cancelled.", default);
+      SendError(id, ErrorCode.Cancelled, default, "The call was cancelled.", default, kind);
     else if (outcome == CallOutcome.TimedOut)
-      SendError(id, ErrorCode.Timeout, default, "The call's deadline passed.", default);
+      SendError(id, ErrorCode.Timeout, default, "The call's deadline passed.", default, kind);
   }
 
   void SendResult<TResponse>(WebSocketCall call, PayloadCodec<TResponse> codec, TResponse result)
@@ -153,12 +150,12 @@ public sealed partial class WebSocketConnection
     }
   }
 
-  void SendCallException(uint id, CallException failure)
+  void SendCallException(uint id, CallException failure, FrameKind kind = FrameKind.Response)
   {
     var custom = ErrorCodes.TryGetCode(failure.Code, out var code) ? default : Encoding.ASCII.GetBytes(failure.Code);
     if (failure.Details is null)
     {
-      SendError(id, code, custom, failure.Message, default);
+      SendError(id, code, custom, failure.Message, default, kind);
       return;
     }
 
@@ -173,11 +170,11 @@ public sealed partial class WebSocketConnection
       catch (Exception exception)
       {
         Log.DetailsNotWritten(Logger, Id, exception);
-        SendError(id, code, custom, failure.Message, default);
+        SendError(id, code, custom, failure.Message, default, kind);
         return;
       }
 
-      SendError(id, code, custom, failure.Message, buffer.WrittenSpan);
+      SendError(id, code, custom, failure.Message, buffer.WrittenSpan, kind);
     }
     finally
     {
@@ -185,11 +182,18 @@ public sealed partial class WebSocketConnection
     }
   }
 
-  internal void SendError(uint id, ErrorCode code, ReadOnlySpan<byte> custom, string message, ReadOnlySpan<byte> details)
+  // A failed Response, or a failed StreamEnd.
+  internal void SendError(
+      uint id,
+      ErrorCode code,
+      ReadOnlySpan<byte> custom,
+      string message,
+      ReadOnlySpan<byte> details,
+      FrameKind kind = FrameKind.Response)
   {
     var frame = new Frame
     {
-      Kind = FrameKind.Response,
+      Kind = kind,
       Flags = FrameFlags.HasError,
       Id = id,
       ErrorCode = code,
