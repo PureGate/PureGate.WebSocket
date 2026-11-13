@@ -11,14 +11,22 @@ using PureGate.WebSocket.Transport;
 namespace PureGate.WebSocket;
 
 // Receiving: the handshake, then one message at a time. Frames are handled synchronously on the receive loop, under
-// the link lock: payloads are read before the buffer is reused, handlers go to the thread pool, and a resume can
-// never meet a message half processed.
+// the link lock: payloads are read before the buffer is reused, and a resume can never meet a message half processed.
+// The handlers a message starts run next on the receive loop, outside the lock, until their first await: one that
+// completes synchronously costs no thread switch, and the answers to a message go out together in one message.
 public sealed partial class WebSocketConnection
 {
   const int FirstReceiveBytes = 4096;
 
+  // The context handlers start in: an empty one, as on the thread pool, so that the upgrade request's activity, log
+  // scopes and HttpContext do not flow into every call.
+  static readonly ExecutionContext HandlerContext = CaptureEmptyContext();
+
   readonly Lock LinkGate = new();
   Link CurrentLink;
+
+  // The link whose message Process is handling, under LinkGate.
+  Link Processing;
 
   // Welcome went out: the session is the browser's, and resumable if resume is on.
   bool Started;
@@ -28,23 +36,10 @@ public sealed partial class WebSocketConnection
 
   string ContractStatus;
 
-  // Accepts one WebSocket: a new session, or the resume of one the endpoint still has.
-  internal static async Task AcceptAsync(EndpointState endpoint, Link link)
+  // Runs one accepted WebSocket: a new session, or the resume of one the endpoint still has. Called on a connection
+  // made for it, which stands in for the session until Hello says which one it is.
+  internal async Task RunAsync(Link link)
   {
-    endpoint.Telemetry.Connections.Add(1);
-    try
-    {
-      await new WebSocketConnection(endpoint, link).RunAsync(link);
-    }
-    finally
-    {
-      endpoint.Telemetry.Connections.Add(-1);
-    }
-  }
-
-  async Task RunAsync(Link link)
-  {
-    link.ReceiveBuffer = ArrayPool<byte>.Shared.Rent(FirstReceiveBytes);
     HelloMessage hello;
     byte[] pipelined;
     Identity identity = default;
@@ -93,6 +88,10 @@ public sealed partial class WebSocketConnection
           // This session was only a stand-in until the right one was found.
           Endpoint.Telemetry.Resumes.Add(1, new KeyValuePair<string, object>("puregate.websocket.resumed", true));
           Outbox.End();
+
+          // Hello need not live as long as the connection (see Take).
+          hello = null;
+          pipelined = null;
           await session.RunLinkAsync(link, null, null, default);
           return;
         case ResumeOutcome.Unavailable:
@@ -104,7 +103,7 @@ public sealed partial class WebSocketConnection
     if (hello.Resume is not null)
       Endpoint.Telemetry.Resumes.Add(1, new KeyValuePair<string, object>("puregate.websocket.resumed", false));
 
-    await RunLinkAsync(link, hello, pipelined, identity);
+    await RunLinkAsync(link, Take(ref hello), Take(ref pipelined), identity);
   }
 
   // Runs link until it ends. hello is set for a new session, which starts here; a resumed one has started already.
@@ -112,9 +111,15 @@ public sealed partial class WebSocketConnection
   {
     try
     {
-      if (hello is null || await StartAsync(link, hello, pipelined, identity))
+      if (hello is null || await StartAsync(link, Take(ref hello), Take(ref pipelined), identity))
       {
-        await ReceiveLoopAsync(link);
+        // The receive loop, here rather than in a method of its own: an idle connection keeps one state machine less.
+        while (true)
+        {
+          var length = await ReceiveMessageAsync(link);
+          if (length < 0 || !Handle(link, link.ReceiveBuffer.AsSpan(0, length)))
+            break;
+        }
 
         // The browser closed: answer its close frame with its own code, as browsers report the answer's code. A close
         // it started ends the session, unless the page is going away (1001) or the client will resume (4006). One
@@ -148,6 +153,16 @@ public sealed partial class WebSocketConnection
 
   static bool IsTransportFailure(Exception exception) =>
     exception is WebSocketException or OperationCanceledException or ObjectDisposedException;
+
+  // Hands value on and clears the variable, so a suspended state machine stops holding it: Hello's token and contract
+  // hash need not live as long as the connection.
+  static T Take<T>(ref T value)
+    where T : class
+  {
+    var taken = value;
+    value = null;
+    return taken;
+  }
 
   async Task<(HelloMessage Hello, byte[] Pipelined)> ReceiveHelloAsync(Link link)
   {
@@ -210,34 +225,80 @@ public sealed partial class WebSocketConnection
     }
 
     if (pipelined.Length > 0)
+      Handle(link, pipelined);
+
+    return true;
+  }
+
+  // Processes one message, runs the handlers it started, and sends what both wrote in one go. False when a resume
+  // replaced link: the session counts nothing more from it.
+  bool Handle(Link link, ReadOnlySpan<byte> message)
+  {
+    Outbox.Cork();
+    try
     {
       lock (LinkGate)
       {
-        if (CurrentLink == link)
-          Process(pipelined);
+        if (CurrentLink != link)
+          return false;
+        if (!link.Closing)
+          Process(link, message);
       }
+    }
+    finally
+    {
+      // Also when the message broke the protocol: the calls it began before that still run, and get their answer.
+      RunStartedHandlers(link);
     }
 
     return true;
   }
 
-  async Task ReceiveLoopAsync(Link link)
+  // Starts a handler from Process: the receive loop runs it once the message is processed. Anywhere else, it goes to
+  // the thread pool.
+  internal void RunHandler(IThreadPoolWorkItem handler)
   {
-    while (true)
-    {
-      var length = await ReceiveMessageAsync(link);
-      if (length < 0)
-        return;
+    if (Processing is { } link)
+      link.StartedHandlers.Add(handler);
+    else
+      ThreadPool.UnsafeQueueUserWorkItem(handler, preferLocal: false);
+  }
 
-      lock (LinkGate)
-      {
-        // Replaced by a resume: the session counts nothing more from here.
-        if (CurrentLink != link)
-          return;
-        if (!link.Closing)
-          Process(link.ReceiveBuffer.AsSpan(0, length));
-      }
+  void RunStartedHandlers(Link link)
+  {
+    try
+    {
+      if (link.StartedHandlers.Count > 0)
+        ExecutionContext.Run(HandlerContext, static state => RunAll((List<IThreadPoolWorkItem>)state), link.StartedHandlers);
     }
+    finally
+    {
+      Outbox.Uncork();
+    }
+  }
+
+  static void RunAll(List<IThreadPoolWorkItem> handlers)
+  {
+    try
+    {
+      for (var i = 0; i < handlers.Count; i++)
+        handlers[i].Execute();
+    }
+    finally
+    {
+      handlers.Clear();
+    }
+  }
+
+  // A thread started without its starter's context has an empty one. A task would not do: the thread waiting for it
+  // may run it inline, in its own context.
+  static ExecutionContext CaptureEmptyContext()
+  {
+    ExecutionContext empty = null;
+    var thread = new Thread(() => empty = ExecutionContext.Capture());
+    thread.UnsafeStart();
+    thread.Join();
+    return empty ?? throw new InvalidOperationException("No empty execution context.");
   }
 
   // The first message starts with Hello. Whatever follows it was pipelined, and is handled after Welcome.
@@ -326,7 +387,21 @@ public sealed partial class WebSocketConnection
     }
   }
 
-  void Process(ReadOnlySpan<byte> message)
+  // Called under LinkGate. The handlers the message starts collect on link, for Handle to run afterwards.
+  void Process(Link link, ReadOnlySpan<byte> message)
+  {
+    Processing = link;
+    try
+    {
+      ProcessFrames(message);
+    }
+    finally
+    {
+      Processing = null;
+    }
+  }
+
+  void ProcessFrames(ReadOnlySpan<byte> message)
   {
     var reader = new FrameReader(message, Side.Client);
     var sequenced = 0;
@@ -385,28 +460,22 @@ public sealed partial class WebSocketConnection
       Processed(sequenced);
   }
 
-  // Receives one whole message into the link's buffer and returns its length, or -1 when the browser closed.
-  // Pooled, since nearly every message waits for the socket.
+  // Receives one whole message into the link's buffer and returns its length, or -1 when the browser closed. It
+  // first waits for the message with a zero-byte receive, and gives the buffer back to the pool when it has to wait,
+  // so an idle connection holds none; one whose next message is already there keeps it. Pooled, since nearly every
+  // message waits for the socket.
   [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder<>))]
   async ValueTask<int> ReceiveMessageAsync(Link link)
   {
+    var next = link.Socket.ReceiveAsync(Memory<byte>.Empty, CancellationToken.None);
+    if (!next.IsCompleted)
+      ReturnReceiveBuffer(link);
+
+    var result = await next;
     var limit = Options.MaxMessageBytes;
     var length = 0;
     while (true)
     {
-      if (length == limit)
-        throw new CloseException(WebSocketCloseStatus.MessageTooBig, $"Messages are limited to {limit} bytes.");
-
-      if (length == link.ReceiveBuffer.Length)
-      {
-        var grown = ArrayPool<byte>.Shared.Rent(Math.Min(limit, length * 2));
-        link.ReceiveBuffer.AsSpan(0, length).CopyTo(grown);
-        ArrayPool<byte>.Shared.Return(link.ReceiveBuffer);
-        link.ReceiveBuffer = grown;
-      }
-
-      var room = Math.Min(link.ReceiveBuffer.Length, limit) - length;
-      var result = await link.Socket.ReceiveAsync(link.ReceiveBuffer.AsMemory(length, room), CancellationToken.None);
       if (result.MessageType == WebSocketMessageType.Close)
         return -1;
       if (result.MessageType == WebSocketMessageType.Text)
@@ -415,13 +484,40 @@ public sealed partial class WebSocketConnection
       length += result.Count;
       if (result.EndOfMessage)
         return length;
+
+      if (length == limit)
+        throw new CloseException(WebSocketCloseStatus.MessageTooBig, $"Messages are limited to {limit} bytes.");
+
+      if (length == link.ReceiveBuffer.Length)
+      {
+        var grown = ArrayPool<byte>.Shared.Rent(length == 0 ? FirstReceiveBytes : Math.Min(limit, length * 2));
+        link.ReceiveBuffer.AsSpan(0, length).CopyTo(grown);
+        ReturnReceiveBuffer(link);
+        link.ReceiveBuffer = grown;
+      }
+
+      var room = Math.Min(link.ReceiveBuffer.Length, limit) - length;
+      result = await link.Socket.ReceiveAsync(link.ReceiveBuffer.AsMemory(length, room), CancellationToken.None);
     }
+  }
+
+  static void ReturnReceiveBuffer(Link link)
+  {
+    var buffer = link.ReceiveBuffer;
+    link.ReceiveBuffer = [];
+    if (buffer.Length > 0)
+      ArrayPool<byte>.Shared.Return(buffer);
   }
 
   // Sends a close frame, then waits a moment for the browser's, so the close code reaches it instead of a reset.
   async Task CloseAndDrainAsync(Link link, WebSocketCloseStatus status, string reason)
   {
     Outbox.Close(link, status, reason);
+
+    // A receive into an empty buffer would only wait for data, never take it.
+    if (link.ReceiveBuffer.Length == 0)
+      link.ReceiveBuffer = ArrayPool<byte>.Shared.Rent(FirstReceiveBytes);
+
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
     try
     {

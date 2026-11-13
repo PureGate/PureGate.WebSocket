@@ -20,9 +20,9 @@ public sealed partial class WebSocketConnection
   // Timers past this are set again when they fire: Timer cannot wait much longer.
   static readonly TimeSpan LongestWait = TimeSpan.FromDays(30);
 
-  // Each policy's outcome for the current user. Replaced, not cleared, when the user changes, so an evaluation that
-  // started for the old user cannot land in the new user's cache.
-  ConcurrentDictionary<string, bool> Authorizations = new(StringComparer.Ordinal);
+  // Each policy's outcome for one user, made when a policy is first evaluated for them. It names its user, so an
+  // evaluation that started for an earlier user never lands in the current one's, and a new user starts afresh.
+  AuthorizationCache Authorizations;
 
   // When the authentication expires; null when it doesn't. Guarded by LinkGate.
   DateTimeOffset? AuthenticationExpires;
@@ -90,9 +90,6 @@ public sealed partial class WebSocketConnection
   // Takes identity as the connection's. Called under LinkGate.
   void SetIdentity(Identity identity)
   {
-    if (!ReferenceEquals(User, identity.User))
-      Authorizations = new ConcurrentDictionary<string, bool>(StringComparer.Ordinal);
-
     User = identity.User;
     AuthenticationExpires = identity.Expires;
     ScheduleAuthenticationExpiry();
@@ -192,14 +189,21 @@ public sealed partial class WebSocketConnection
   // Null when the connection's user passes every policy; otherwise the reason it does not, as the call's error.
   internal async ValueTask<CallException> AuthorizeAsync(string[] policies)
   {
-    var cache = Authorizations;
     var user = User;
+    var cache = Volatile.Read(ref Authorizations);
+    if (cache?.User != user)
+    {
+      // Two calls that race here each make one, and one of them is kept: outcomes are only ever evaluated again.
+      cache = new AuthorizationCache(user);
+      Volatile.Write(ref Authorizations, cache);
+    }
+
     foreach (var policy in policies)
     {
-      if (!cache.TryGetValue(policy, out var allowed))
+      if (!cache.Outcomes.TryGetValue(policy, out var allowed))
       {
         allowed = await Endpoint.AuthorizeAsync(user, policy);
-        cache[policy] = allowed;
+        cache.Outcomes[policy] = allowed;
       }
 
       if (!allowed)
@@ -247,4 +251,12 @@ public sealed partial class WebSocketConnection
 
   // An exchange that did not start lets its permit go.
   void ReleaseUnusedLease() => TakeLease()?.Dispose();
+}
+
+sealed class AuthorizationCache(ClaimsPrincipal user)
+{
+  public ClaimsPrincipal User { get; } = user;
+
+  // One lock: only the connection's handlers contend for it.
+  public ConcurrentDictionary<string, bool> Outcomes { get; } = new(1, 4, StringComparer.Ordinal);
 }

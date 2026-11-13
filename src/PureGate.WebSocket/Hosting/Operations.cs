@@ -15,7 +15,8 @@ enum OperationKind
 }
 
 // Something a browser can call or send by name. Start runs on the receive loop: it reads the payload while the
-// message is still in the buffer, then hands the handler to the thread pool.
+// message is still in the buffer, then starts the handler, which the receive loop runs once the message is
+// processed (WebSocketConnection.RunHandler).
 abstract class Operation(string name, OperationKind kind)
 {
   // What every name without a handler resolves to, so the name table never keeps a client's text.
@@ -96,7 +97,7 @@ sealed class RequestOperation<TRequest, TResponse>(
     }
 
     var call = connection.BeginCall(this, in frame);
-    ThreadPool.UnsafeQueueUserWorkItem(new Run(this, connection, call, value), preferLocal: false);
+    connection.RunHandler(new Run(this, connection, call, value));
   }
 
   sealed class Run(
@@ -234,7 +235,7 @@ sealed class StreamOperation<TRequest, TItem>(
     }
 
     var stream = connection.BeginDownload(this, in frame);
-    ThreadPool.UnsafeQueueUserWorkItem(new Run(this, connection, stream, value), preferLocal: false);
+    connection.RunHandler(new Run(this, connection, stream, value));
   }
 
   sealed class Run(
@@ -314,7 +315,7 @@ sealed class UploadOperation<TRequest, TItem, TResponse>(
     }
 
     var upload = connection.BeginUpload(this, in frame, item);
-    ThreadPool.UnsafeQueueUserWorkItem(new Run(this, connection, upload, value), preferLocal: false);
+    connection.RunHandler(new Run(this, connection, upload, value));
   }
 
   sealed class Run(
@@ -367,10 +368,15 @@ interface IUploadOperation
 }
 
 // One event waiting for, or running in, its handler.
-abstract class EventWork
+abstract class EventWork : IThreadPoolWorkItem
 {
+  // Set when the event starts on its own, under EventOrdering.Concurrent.
+  public WebSocketConnection Connection;
+
   // Runs the handler. Never throws: failures go to the log.
   public abstract Task RunAsync(WebSocketConnection connection);
+
+  void IThreadPoolWorkItem.Execute() => _ = RunAsync(Connection);
 }
 
 // What the contract needs to know of something the server sends: its name and payload types.

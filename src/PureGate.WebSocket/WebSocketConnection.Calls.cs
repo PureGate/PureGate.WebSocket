@@ -22,9 +22,9 @@ public sealed partial class WebSocketConnection
   readonly Lock CallsGate = new();
 
   // Cancellation sources of finished calls, linked to the session's token, for later calls to reuse as Kestrel reuses
-  // RequestAborted's: TryReset keeps the link and the deadline's timer, so neither is created for every call.
+  // RequestAborted's: TryReset keeps the link and the deadline's timer, so neither is created for every call. Guarded
+  // by CallsGate.
   readonly Stack<CancellationTokenSource> SpareCancellations = new();
-  readonly Lock SpareCancellationsGate = new();
 
   enum CallOutcome
   {
@@ -85,7 +85,7 @@ public sealed partial class WebSocketConnection
 
   internal CancellationTokenSource RentCancellation()
   {
-    lock (SpareCancellationsGate)
+    lock (CallsGate)
     {
       while (SpareCancellations.TryPop(out var spare))
       {
@@ -105,7 +105,7 @@ public sealed partial class WebSocketConnection
   {
     if (cancellation.TryReset())
     {
-      lock (SpareCancellationsGate)
+      lock (CallsGate)
       {
         if (SpareCancellations.Count < SpareCancellationLimit)
         {

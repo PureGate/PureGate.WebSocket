@@ -242,6 +242,22 @@ sealed class TestClient : IAsyncDisposable
     return Buffered.Dequeue();
   }
 
+  // The frames of the next message, for tests of how the server groups frames into messages.
+  public async Task<List<Received>> ReceiveOneMessageAsync(TimeSpan timeout = default)
+  {
+    Assert.That(Buffered, Is.Empty, "Frames of an earlier message are still waiting.");
+    var (type, length) = await ReceiveMessageAsync(timeout == default ? DefaultTimeout : timeout);
+    if (type == WebSocketMessageType.Close)
+      Assert.Fail($"The server closed with {Socket.CloseStatus}: {Socket.CloseStatusDescription}");
+
+    var frames = new List<Received>();
+    var reader = new FrameReader(ReceiveBuffer.AsSpan(0, length), Side.Server);
+    while (reader.TryRead(out var frame))
+      frames.Add(Received.From(in frame));
+
+    return frames;
+  }
+
   // The next frame of this kind and id, keeping the others for later.
   public async Task<Received> ReceiveAsync(FrameKind kind, uint id, TimeSpan timeout = default)
   {

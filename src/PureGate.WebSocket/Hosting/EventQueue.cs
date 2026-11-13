@@ -1,8 +1,9 @@
 namespace PureGate.WebSocket.Hosting;
 
 // One connection's events, handled one at a time in the order they arrived. Nothing runs while the queue is
-// empty: the first event starts a worker on the thread pool, and the worker stops when it has drained the queue.
-sealed class EventQueue(WebSocketConnection connection)
+// empty: the first event starts a worker, which the receive loop runs (WebSocketConnection.RunHandler), and the worker
+// stops when it has drained the queue.
+sealed class EventQueue(WebSocketConnection connection) : IThreadPoolWorkItem
 {
   readonly Queue<EventWork> Items = new();
   readonly Lock Gate = new();
@@ -19,8 +20,10 @@ sealed class EventQueue(WebSocketConnection connection)
     }
 
     if (start)
-      ThreadPool.UnsafeQueueUserWorkItem(static queue => _ = queue.RunAsync(), this, preferLocal: false);
+      connection.RunHandler(this);
   }
+
+  void IThreadPoolWorkItem.Execute() => _ = RunAsync();
 
   async Task RunAsync()
   {

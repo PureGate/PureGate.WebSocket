@@ -62,7 +62,9 @@ ws.MapUpload<TRequest, TItem, TResponse>(name, (request, items, call, cancellati
 ws.MapClientEvent<T>(name, (payload, call, cancellationToken) => ValueTask);
 ```
 
-Overloads drop the request or the result. The `cancellationToken` fires when the browser cancels, the deadline passes, or the session ends. `call.Services` is a DI scope created only when you use it, and `call.Connection` reaches the connection: its user, its groups, `SendAsync` and `InvokeAsync`.
+Overloads drop the request or the result. The `cancellationToken` fires when the browser cancels, the deadline passes, or the session ends; like `call`, it is valid only until the handler finishes. `call.Services` is a DI scope created only when you use it, and `call.Connection` reaches the connection: its user, its groups, `SendAsync` and `InvokeAsync`.
+
+Handlers start on the connection's receive loop as soon as their message is read, so one that finishes without waiting costs no thread switch. Until its first `await`, though, a handler holds up its connection's next messages. Move blocking or CPU-heavy work off the loop with `await Task.Yield()` first, and never wait synchronously for the connection's own `InvokeAsync`: its answer arrives on the loop you would be holding.
 
 A handler that throws `CallException("code", "message", details)` fails the call with that code, which the browser sees as `CallError`. Any other exception becomes `handler_failed`, with its message kept on the server unless `IncludeExceptionDetails` is on.
 

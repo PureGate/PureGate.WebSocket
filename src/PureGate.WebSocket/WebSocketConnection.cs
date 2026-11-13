@@ -50,8 +50,21 @@ public sealed partial class WebSocketConnection
   // The id hub.User(id) finds this connection by, from PureGateWebSocketOptions.UserId. Null without one.
   public string UserId { get; private set; }
 
-  // Whatever the app wants to keep with the connection. Safe to use from several handlers at once.
-  public IDictionary<object, object> Items { get; } = new ConcurrentDictionary<object, object>();
+  // Whatever the app wants to keep with the connection. Safe to use from several handlers at once. Created the first
+  // time it is read, with one lock: only the connection's handlers contend for it.
+  public IDictionary<object, object> Items
+  {
+    get
+    {
+      if (Volatile.Read(ref ItemsStore) is { } items)
+        return items;
+
+      Interlocked.CompareExchange(ref ItemsStore, new ConcurrentDictionary<object, object>(1, 4), null);
+      return ItemsStore;
+    }
+  }
+
+  ConcurrentDictionary<object, object> ItemsStore;
 
   public WebSocketGroups Groups { get; }
 

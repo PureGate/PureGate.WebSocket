@@ -180,7 +180,16 @@ sealed class EndpointState
       DangerousEnableCompression = Options.EnableCompression,
     });
 
-    await WebSocketConnection.AcceptAsync(this, new Transport.Link(socket, context));
+    var link = new Transport.Link(socket, context);
+    Telemetry.Connections.Add(1);
+    try
+    {
+      await new WebSocketConnection(this, link).RunAsync(link);
+    }
+    finally
+    {
+      Telemetry.Connections.Add(-1);
+    }
   }
 
   // Every session of this endpoint by its id, connected or waiting for a resume.

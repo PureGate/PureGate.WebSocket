@@ -1,5 +1,7 @@
 using System.Net.WebSockets;
 using System.Text;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using PureGate.WebSocket.Protocol;
 
 namespace PureGate.WebSocket.Test.Integration;
@@ -289,6 +291,32 @@ public sealed class CallTests
     await using var client = await host.ConnectAndHelloAsync();
 
     Assert.That((await client.CallAsync(1, "test.services")).Text, Is.EqualTo("\"test.services\""));
+  }
+
+  [Test]
+  public async Task AnswersTheCallsOfOneMessageInOneMessage()
+  {
+    await using var client = await Host.ConnectAndHelloAsync();
+    // The whole window of 8.
+    await client.SendAsync([.. Enumerable.Range(1, 8).Select(id => Outgoing.Request((uint)id, "math.add", $$"""{"a":{{id}},"b":1}"""))]);
+
+    var answers = await client.ReceiveOneMessageAsync();
+    Assert.That(
+      answers.Select(frame => (frame.Kind, frame.Id, frame.Text)).ToArray(),
+      Is.EqualTo(Enumerable.Range(1, 8).Select(id => (FrameKind.Response, (uint)id, $"{id + 1}")).ToArray()));
+  }
+
+  // Handlers start on the receive loop, which runs in the upgrade request's context, but see none of it.
+  [Test]
+  public async Task StartsHandlersOutsideTheUpgradeRequestsContext()
+  {
+    await using var host = await TestHost.StartAsync(
+      services: static services => services.AddHttpContextAccessor(),
+      map: static ws => ws.MapRequest<string>("test.context", static (call, _) =>
+        ValueTask.FromResult(call.Services.GetRequiredService<IHttpContextAccessor>().HttpContext is null ? "empty" : "request")));
+    await using var client = await host.ConnectAndHelloAsync();
+
+    Assert.That((await client.CallAsync(1, "test.context")).Text, Is.EqualTo("\"empty\""));
   }
 
   [Test]

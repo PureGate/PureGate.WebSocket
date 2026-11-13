@@ -6,7 +6,7 @@ Measured on 2026-11-13: Intel Core Ultra 7 265KF (20 cores), 64 GB, Windows 11 P
 
 ## Server
 
-The server runs in its own process, so its memory, allocations and CPU are its own, and the clients run in another. Both have tiered compilation off (`TC=0`), and nothing warms up first. Each figure is the median of 3 runs of 2 seconds.
+The server runs in its own process, so its memory, allocations and CPU are its own, and the clients run in another. Both have tiered compilation off (`TC=0`), and nothing warms up first. Each figure is the median of 3 runs of 2 seconds, and all of them come from one run of the suite: on this machine, figures from different runs vary by up to 15%, so systems compare only within a table.
 
 - **PureGate.WebSocket** is driven by a minimal C# client on the library's own frame codec. It sends the way the browser client does: every call carries the browser's default 30 s deadline, and the frames written while a message is going out are coalesced into the next one.
 - **SignalR** is driven by its own .NET client, over WebSockets, with the JSON and the MessagePack protocols.
@@ -15,9 +15,9 @@ The server runs in its own process, so its memory, allocations and CPU are its o
 
 | System | calls/s | p50 ms | p99 ms | server bytes/call |
 |---|---:|---:|---:|---:|
-| PureGate.WebSocket | 22,141 | 0.041 | 0.097 | 2,236 |
-| SignalR JSON | 14,057 | 0.067 | 0.155 | 2,689 |
-| SignalR MessagePack | 15,463 | 0.061 | 0.123 | 2,688 |
+| PureGate.WebSocket | 30,014 | 0.03 | 0.072 | 2,236 |
+| SignalR JSON | 18,087 | 0.049 | 0.124 | 2,689 |
+| SignalR MessagePack | 20,716 | 0.043 | 0.106 | 2,688 |
 
 The echoed 1 KB string is 2,072 of the bytes each call allocates.
 
@@ -25,9 +25,9 @@ The echoed 1 KB string is 2,072 of the bytes each call allocates.
 
 | System | calls/s | p50 ms | p99 ms |
 |---|---:|---:|---:|
-| PureGate.WebSocket | 602,888 | 0.09 | 0.367 |
-| SignalR JSON | 118,042 | 0.494 | 0.915 |
-| SignalR MessagePack | 292,592 | 0.192 | 0.488 |
+| PureGate.WebSocket | 551,239 | 0.106 | 0.355 |
+| SignalR JSON | 187,101 | 0.305 | 0.689 |
+| SignalR MessagePack | 340,586 | 0.177 | 0.494 |
 
 ### 1,000 connections making steady calls
 
@@ -35,9 +35,9 @@ Every connection calls, waits 10 ms and calls again. Windows rounds the wait up 
 
 | System | calls/s | p50 ms | p99 ms | server CPU % |
 |---|---:|---:|---:|---:|
-| PureGate.WebSocket | 58,916 | 1.956 | 13.458 | 10.273 |
-| SignalR JSON | 58,592 | 2.164 | 17.878 | 11.202 |
-| SignalR MessagePack | 58,847 | 2.077 | 9.449 | 10.795 |
+| PureGate.WebSocket | 59,537 | 1.526 | 10.815 | 7.484 |
+| SignalR JSON | 58,512 | 2.148 | 14.438 | 9.689 |
+| SignalR MessagePack | 58,847 | 1.896 | 13.348 | 8.734 |
 
 ### 10,000 idle connections, then one broadcast to all
 
@@ -45,9 +45,9 @@ The server's heap per idle connection, and the time from the broadcast call unti
 
 | System | server KB/connection | broadcast ms |
 |---|---:|---:|
-| PureGate.WebSocket | 23.785 | 23.755 |
-| SignalR JSON | 22.424 | 27.629 |
-| SignalR MessagePack | 23.725 | 29.065 |
+| PureGate.WebSocket | 15.81 | 15.223 |
+| SignalR JSON | 23.957 | 17.648 |
+| SignalR MessagePack | 23.927 | 21.047 |
 
 PureGate.WebSocket also keeps the event, as it keeps everything it sends, until the browser acknowledges it, so that a session can resume without losing it.
 

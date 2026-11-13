@@ -61,6 +61,9 @@ sealed class Link(NetWebSocket socket, HttpContext context) : IThreadPoolWorkIte
   public byte[] ReceiveBuffer = [];
   public volatile bool HelloReceived;
 
+  // The handlers the message being processed started, for the receive loop to run once it is processed.
+  public readonly List<IThreadPoolWorkItem> StartedHandlers = [];
+
   // Completes once nothing more will be sent: after the close frame, or when the socket failed.
   public Task Completion => Stopped.Task;
 
@@ -84,12 +87,15 @@ sealed class Outbox(long queueLimit, long replayLimit)
 
   readonly Lock Gate = new();
   readonly OutgoingNameTable Names = new();
-  readonly PooledBuffer Scratch = new(256);
   ReplayBuffer Replay = replayLimit > 0 ? new ReplayBuffer(replayLimit) : null;
   Link Attached;
   long SentCount;
   long AcknowledgedCount;
   bool Ended;
+
+  // The thread running a received message and its handlers (Cork), whose writes start no send until Uncork, so they
+  // go out together. 0 for none.
+  int CorkedThread;
 
   // Called, outside the lock, when a frame could not be kept while no link is attached: the session cannot resume.
   public Action ResumeLost { get; set; }
@@ -168,7 +174,8 @@ sealed class Outbox(long queueLimit, long replayLimit)
           FrameWriter.Write(buffer, in copy);
           if (sequenced)
             Replay?.Append(buffer.WrittenSpan[offset..]);
-          if (!link.Sending)
+          // Held back for Uncork while corked, until a whole message is ready.
+          if (!link.Sending && (CorkedThread != Environment.CurrentManagedThreadId || link.Ready.Count > 0))
           {
             link.Sending = true;
             start = link;
@@ -176,9 +183,11 @@ sealed class Outbox(long queueLimit, long replayLimit)
         }
         else
         {
-          Scratch.Clear();
-          FrameWriter.Write(Scratch, in copy);
-          Replay.Append(Scratch.WrittenSpan);
+          // Without a link, the frame is written only to be kept.
+          var scratch = PooledBuffer.Scratch();
+          FrameWriter.Write(scratch, in copy);
+          Replay.Append(scratch.WrittenSpan);
+          scratch.ReturnScratch();
         }
 
         if (sequenced)
@@ -201,6 +210,28 @@ sealed class Outbox(long queueLimit, long replayLimit)
     }
 
     return WriteResult.Written;
+  }
+
+  // Holds back the sends this thread's writes would start, until Uncork on the same thread sends what they wrote.
+  public void Cork() => Volatile.Write(ref CorkedThread, Environment.CurrentManagedThreadId);
+
+  public void Uncork()
+  {
+    Link start = null;
+    lock (Gate)
+    {
+      if (CorkedThread == Environment.CurrentManagedThreadId)
+        CorkedThread = 0;
+
+      if (Attached is { Sending: false } link && (link.Ready.Count > 0 || link.Current is { WrittenCount: > 0 }))
+      {
+        link.Sending = true;
+        start = link;
+      }
+    }
+
+    if (start is not null)
+      _ = SendAsync(start);
   }
 
   // Whether a client that processed received frames can resume: every frame after them is still kept.
@@ -316,7 +347,6 @@ sealed class Outbox(long queueLimit, long replayLimit)
       Ended = true;
       Replay?.Clear();
       Replay = null;
-      Scratch.Return();
     }
   }
 

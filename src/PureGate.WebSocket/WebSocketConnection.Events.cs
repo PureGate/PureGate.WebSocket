@@ -107,10 +107,8 @@ public sealed partial class WebSocketConnection
     }
 
     EventPickedUp();
-    ThreadPool.UnsafeQueueUserWorkItem(
-      static state => _ = state.Work.RunAsync(state.Connection),
-      (Work: work, Connection: this),
-      preferLocal: false);
+    work.Connection = this;
+    RunHandler(work);
   }
 
   internal WebSocketCall BeginEvent(string name, string traceParent, System.Threading.RateLimiting.RateLimitLease lease) =>

@@ -141,10 +141,7 @@ public sealed partial class WebSocketConnection
       }
     }
 
-    var buffer = link.ReceiveBuffer;
-    link.ReceiveBuffer = [];
-    if (buffer.Length > 0)
-      System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+    ReturnReceiveBuffer(link);
 
     if (end)
       await EndAsync();
