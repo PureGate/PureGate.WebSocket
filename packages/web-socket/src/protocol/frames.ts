@@ -185,3 +185,8 @@ export function canSend(kind: number, from: Side): boolean {
 export function nameHasText(code: number): boolean {
   return code === 0 || code % 2 === 1;
 }
+
+/** Whether frames of this kind are counted for acknowledgement and resume: Request through Cancel. */
+export function isSequenced(kind: FrameKind): boolean {
+  return kind >= FrameKind.Request && kind <= FrameKind.Cancel;
+}

@@ -192,7 +192,7 @@ The mapped types are homomorphic (`[K in keyof G]`), so the editor links each pa
 
 **Server shutdown.** On GoAway, the client opens a new connection at once and sends new calls and events there, while the old connection finishes the exchanges in progress. The new connection has a new session, so `onStateChange` reports `resumed: false`.
 
-**Page lifecycle.** On `pagehide` into the back/forward cache, the client closes with 1001 and keeps the session; on `pageshow` it resumes. That keeps the page eligible for the cache. Background tabs run timers late. Liveness compares timestamps rather than counting timer ticks, so a late timer never looks like a dead connection.
+**Page lifecycle.** On `pagehide` into the back/forward cache, the client closes with 4006 (`reconnecting`; browsers cannot send 1001 themselves) and keeps the session; on `pageshow` it resumes. That keeps the page eligible for the cache. Background tabs run timers late. Liveness compares timestamps rather than counting timer ticks, so a late timer never looks like a dead connection.
 
 **Environments.** Evergreen browsers. The client uses only features that are Baseline 2024 or older, such as `Promise.withResolvers` and `AbortSignal.any`. It also works in web workers, where the page lifecycle hooks are skipped. Node 22 and later, which have a global `WebSocket`, run it too; that's what the tests use, and not a goal beyond that.
 

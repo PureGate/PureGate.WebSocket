@@ -89,6 +89,12 @@ export class FrameWriter {
     this.#length = offset;
   }
 
+  /** Appends frames that were written before, as a resume sends them again. */
+  append(frames: Uint8Array): void {
+    this.#reserve(frames.length).set(frames, this.#length);
+    this.#length += frames.length;
+  }
+
   // Makes room for length more bytes and returns the buffer to write them into.
   #reserve(length: number): Uint8Array<ArrayBuffer> {
     const needed = this.#length + length;

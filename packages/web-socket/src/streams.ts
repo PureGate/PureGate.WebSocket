@@ -3,15 +3,19 @@ import { CallError } from "./errors.ts";
 import { decodePayload, encodePayload, type Payload } from "./payload.ts";
 import { ProtocolError } from "./protocol/violation.ts";
 
-// Streams in both directions (docs/PROTOCOL.md, Streams). The connection opens them, within its streams window, and
-// routes their frames here; these classes keep each stream's credit and its side of the exchange.
+// Streams in both directions (docs/PROTOCOL.md, Streams). The connection queues them, a session opens them within its
+// streams window and routes their frames here; these classes keep each stream's credit and its side of the exchange.
 
-/** What a stream needs from its connection. */
-export interface StreamHost {
-  /** Opens the stream when the window has room. It may refuse it, or report the connection closed, at once. */
+/** Where a stream waits for a session to open it. */
+export interface StreamQueue {
+  /** Opens the stream when a window has room. It may refuse it, or report the connection closed, at once. */
   open(stream: Exchange): void;
   /** Takes back a stream that has not opened yet. */
   dequeue(stream: Exchange): void;
+}
+
+/** What an open stream sends through the session that opened it. */
+export interface StreamLink {
   credit(id: number, amount: number): void;
   cancel(id: number): void;
   /** False when the item is larger than the server accepts. */
@@ -31,7 +35,7 @@ export interface Exchange {
   /** The credit its StreamOpen carries. */
   readonly initialCredit: number;
   /** Its StreamOpen went out with this id. */
-  opened(id: number): void;
+  opened(id: number, link: StreamLink): void;
   /** Its StreamOpen can never go out: too large, or too many streams waiting. */
   refused(error: CallError): void;
   /** The connection closed. */
@@ -53,7 +57,7 @@ export class Download<T> implements CallStream<T>, Exchange {
   readonly payload: Payload;
   readonly initialCredit: number;
 
-  readonly #host: StreamHost;
+  readonly #host: StreamQueue;
   readonly #batch: number;
   readonly #signal: AbortSignal | undefined;
   readonly #items: unknown[] = [];
@@ -61,6 +65,7 @@ export class Download<T> implements CallStream<T>, Exchange {
   readonly #onAbort = () => this.#stop(cancelled());
 
   #id = 0;
+  #link: StreamLink | undefined;
   #state: "idle" | "queued" | "open" | "done" = "idle";
   /** Items the server may still send. */
   #credit: number;
@@ -71,7 +76,7 @@ export class Download<T> implements CallStream<T>, Exchange {
   /** Thrown once the buffered items are taken. */
   #error: CallError | undefined;
 
-  constructor(host: StreamHost, name: string, payload: Payload, buffer: number, signal: AbortSignal | undefined) {
+  constructor(host: StreamQueue, name: string, payload: Payload, buffer: number, signal: AbortSignal | undefined) {
     this.#host = host;
     this.name = name;
     this.payload = payload;
@@ -106,7 +111,8 @@ export class Download<T> implements CallStream<T>, Exchange {
 
   // The connection's side.
 
-  opened(id: number): void {
+  opened(id: number, link: StreamLink): void {
+    this.#link = link;
     this.#id = id;
     this.#state = "open";
   }
@@ -168,7 +174,7 @@ export class Download<T> implements CallStream<T>, Exchange {
   #counted(): void {
     if (this.#state !== "open" || this.#stopped || ++this.#taken < this.#batch) return;
     this.#credit += this.#taken;
-    this.#host.credit(this.#id, this.#taken);
+    this.#link?.credit(this.#id, this.#taken);
     this.#taken = 0;
   }
 
@@ -184,7 +190,7 @@ export class Download<T> implements CallStream<T>, Exchange {
       this.#host.dequeue(this);
       this.#state = "done";
     } else if (this.#state === "open") {
-      this.#host.cancel(this.#id);
+      this.#link?.cancel(this.#id);
     } else if (this.#state === "idle") {
       this.#state = "done";
     }
@@ -288,7 +294,7 @@ export class Upload implements Exchange {
   readonly payload: Payload;
   readonly promise: Promise<unknown>;
 
-  readonly #host: StreamHost;
+  readonly #host: StreamQueue;
   readonly #source: SourceReader;
   readonly #signal: AbortSignal | undefined;
   readonly #resolve: (value: unknown) => void;
@@ -296,6 +302,7 @@ export class Upload implements Exchange {
   readonly #onAbort = () => this.#stop(cancelled());
 
   #id = 0;
+  #link: StreamLink | undefined;
   #state: "queued" | "open" | "done" = "queued";
   #credit = 0;
   #reading = false;
@@ -307,7 +314,7 @@ export class Upload implements Exchange {
   #timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
-    host: StreamHost,
+    host: StreamQueue,
     name: string,
     payload: Payload,
     source: UploadSource<unknown>,
@@ -322,7 +329,7 @@ export class Upload implements Exchange {
     this.promise = promise;
     this.#resolve = resolve;
     this.#reject = reject;
-    this.#source = readerOf(source, () => host.maxItemBytes());
+    this.#source = readerOf(source, () => (this.#link as StreamLink).maxItemBytes());
 
     if (signal?.aborted) {
       this.#state = "done";
@@ -341,7 +348,8 @@ export class Upload implements Exchange {
 
   // The connection's side.
 
-  opened(id: number): void {
+  opened(id: number, link: StreamLink): void {
+    this.#link = link;
     this.#id = id;
     this.#state = "open";
   }
@@ -373,7 +381,7 @@ export class Upload implements Exchange {
     // An answer before the source ended: stop reading and end the stream.
     if (!this.#ended) {
       this.#ended = true;
-      this.#host.end(this.#id, undefined);
+      this.#link?.end(this.#id, undefined);
       this.#source.release();
     }
 
@@ -401,7 +409,7 @@ export class Upload implements Exchange {
         if (!this.#sending) return;
         if (next.done) {
           this.#ended = true;
-          this.#host.end(this.#id, undefined);
+          this.#link?.end(this.#id, undefined);
           this.#release();
           return;
         }
@@ -415,7 +423,7 @@ export class Upload implements Exchange {
         }
 
         this.#credit--;
-        if (!this.#host.item(this.#id, payload)) {
+        if (!this.#link?.item(this.#id, payload)) {
           this.#fail(new CallError("payload_too_large", `An item of ${this.name} is larger than the server accepts.`));
           return;
         }
@@ -433,7 +441,7 @@ export class Upload implements Exchange {
   // promise rejects with the reason.
   #fail(error: unknown): void {
     this.#ended = true;
-    this.#host.end(this.#id, sourceError(error));
+    this.#link?.end(this.#id, sourceError(error));
     this.#settle(error);
     this.#source.release();
     this.#release();
@@ -448,7 +456,7 @@ export class Upload implements Exchange {
       this.#host.dequeue(this);
     } else if (this.#state === "open" && !this.#answered) {
       this.#ended = true;
-      this.#host.cancel(this.#id);
+      this.#link?.cancel(this.#id);
     }
 
     this.#source.release();
@@ -457,7 +465,7 @@ export class Upload implements Exchange {
   #release(): void {
     if (this.#state !== "open" || !this.#ended || !this.#answered) return;
     this.#state = "done";
-    this.#host.release(this.#id);
+    this.#link?.release(this.#id);
   }
 
   #settle(error: unknown, value?: unknown): void {

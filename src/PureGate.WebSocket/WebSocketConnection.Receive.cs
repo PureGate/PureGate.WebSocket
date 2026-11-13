@@ -96,11 +96,13 @@ public sealed partial class WebSocketConnection
       {
         await ReceiveLoopAsync(link);
 
-        // The browser closed: answer its close frame. A close it started ends the session, unless the page is going
-        // away (1001) or the client will resume (4006). One that answers the server's close says nothing of its own.
+        // The browser closed: answer its close frame with its own code, as browsers report the answer's code. A close
+        // it started ends the session, unless the page is going away (1001) or the client will resume (4006). One
+        // that answers the server's close says nothing of its own.
+        var status = link.Socket.CloseStatus is { } code and not WebSocketCloseStatus.Empty ? code : WebSocketCloseStatus.NormalClosure;
         if (!link.Closing)
-          link.EndsSession |= link.Socket.CloseStatus is not (WebSocketCloseStatus.EndpointUnavailable or (WebSocketCloseStatus)CloseCodes.Reconnecting);
-        Outbox.Close(link, WebSocketCloseStatus.NormalClosure, "");
+          link.EndsSession |= status is not (WebSocketCloseStatus.EndpointUnavailable or (WebSocketCloseStatus)CloseCodes.Reconnecting);
+        Outbox.Close(link, status, "");
       }
     }
     catch (ProtocolException exception)

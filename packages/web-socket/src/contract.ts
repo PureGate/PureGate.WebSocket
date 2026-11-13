@@ -130,15 +130,30 @@ export type HandleOf<G> = {
     : HandleOf<G[K]>;
 };
 
-export type ConnectionState = "connecting" | "open" | "closed";
+/**
+ * "connecting" until the first Welcome, "open" while connected, "reconnecting" after the connection dropped or the
+ * server went away, and "closed" for good.
+ */
+export type ConnectionState = "connecting" | "open" | "reconnecting" | "closed";
 
 /** What changed with a state, when it applies. */
 export interface StateChange {
-  /** Set when the state becomes "open": whether an earlier session carried on. */
+  /**
+   * Set when the state becomes "open": whether the session carried on. After false, calls, streams and events in
+   * progress failed or may be lost, so reload what the page shows.
+   */
   readonly resumed?: boolean;
-  /** Set when the state becomes "closed": the WebSocket close code. */
+  /** Set when the state becomes "reconnecting" or "closed": the WebSocket close code. */
   readonly code?: number;
   readonly reason?: string;
+}
+
+/** How the connection comes back after a drop. */
+export interface ReconnectOptions {
+  /** Milliseconds before each attempt; the last one repeats. [0, 1000, 2000, 5000, 10000, 30000]. */
+  readonly delays?: readonly number[];
+  /** How much each delay varies at random, as a fraction of it, so clients don't all come back at once. 0.2. */
+  readonly jitter?: number;
 }
 
 /** The calls and streams of a connection with default options, from conn.with(options). */
@@ -163,7 +178,7 @@ export interface Connection<C extends ContractShape = ContractShape> {
   /** Answers the server's calls: conn.handle.ui.confirm(handler). One handler per name. */
   readonly handle: HandleOf<Section<C, "clientApi">>;
   readonly state: ConnectionState;
-  /** Resolves when the connection first opens; rejects if it closes before that. */
+  /** Resolves when the connection first opens; rejects if it closes for good before that. */
   readonly opened: Promise<void>;
   /** The server's id for the connection, for logs. Empty until open. */
   readonly connectionId: string;
@@ -171,7 +186,7 @@ export interface Connection<C extends ContractShape = ContractShape> {
   with(options: CallOptions): CallView<C>;
   /** Returns a function that stops listening. */
   onStateChange(listener: (state: ConnectionState, change: StateChange) => void): () => void;
-  /** Closes for good. Outstanding calls fail with connection_closed. */
+  /** Closes for good, without reconnecting. Outstanding calls fail with connection_closed. */
   close(code?: number, reason?: string): Promise<void>;
 }
 
@@ -180,7 +195,7 @@ export type WebSocketConstructor = new (url: string | URL, protocols?: string | 
 export interface ConnectOptions {
   /** The contract's hash, from the generated contract.ts. A development server warns when it is stale. */
   readonly contractHash?: string;
-  /** A credential for servers that authenticate by token, called for every connect. */
+  /** A credential for servers that authenticate by token, called for every connect and reconnect. */
   readonly token?: () => string | Promise<string>;
   /** Default milliseconds a call waits. 30,000. */
   readonly timeout?: number;
@@ -196,6 +211,8 @@ export interface ConnectOptions {
   readonly traceparent?: () => string | undefined;
   /** Receives exceptions from listeners and handlers. console.error by default. */
   readonly onError?: (error: unknown) => void;
+  /** How the connection comes back after a drop, or false to close for good instead. */
+  readonly reconnect?: false | ReconnectOptions;
   /** Another WebSocket implementation, for tests or unusual environments. */
   readonly WebSocket?: WebSocketConstructor;
 }

@@ -69,6 +69,14 @@ public static class TestApi
     ws.MapRequest("misc.noop", static (call, cancellationToken) => ValueTask.CompletedTask);
     ws.MapRequest<string>("misc.consume", static (text, call, cancellationToken) => ValueTask.CompletedTask);
 
+    // Cuts the connection, as a network would: the session stays for the browser to resume, and this call's answer
+    // waits for it.
+    ws.MapRequest("misc.drop", static (call, cancellationToken) =>
+    {
+      call.Connection.HttpContext.Abort();
+      return ValueTask.CompletedTask;
+    });
+
     var calls = ws.MapGroup("calls");
     calls.MapRequest<int, string>("delay", static async (milliseconds, call, cancellationToken) =>
     {
@@ -118,6 +126,18 @@ public static class TestApi
 
     var events = ws.MapGroup("events");
     events.MapRequest<string>("echo", static (text, call, cancellationToken) => call.Connection.SendAsync(Received, text, cancellationToken));
+
+    // Answers at once, and sends the event a moment later, while a test may have the connection down.
+    events.MapRequest<string>("later", static (text, call, cancellationToken) =>
+    {
+      var connection = call.Connection;
+      _ = Task.Delay(200, CancellationToken.None).ContinueWith(
+        _ => connection.SendAsync(Received, text).AsTask(),
+        CancellationToken.None,
+        TaskContinuationOptions.None,
+        TaskScheduler.Default);
+      return ValueTask.CompletedTask;
+    });
     events.MapRequest<Note>("broadcast", static (note, call, cancellationToken) =>
       call.Services.GetRequiredService<IWebSocketHub>().All.SendAsync(Broadcast, note, cancellationToken));
     events.MapRequest<string>("join", static (group, call, cancellationToken) =>

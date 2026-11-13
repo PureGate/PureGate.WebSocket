@@ -112,7 +112,8 @@ describe("client", () => {
     socket.protocol = "";
     socket.open();
 
-    expect(socket.closedWith?.code).toBe(1002);
+    // Browsers only send 1000 and 3000–4999 themselves.
+    expect(socket.closedWith?.code).toBe(4000);
   });
 
   it("closes when the server answers more calls at once than the browser takes", async () => {
@@ -128,9 +129,9 @@ describe("client", () => {
     expect(errors[0]).toMatchObject({ violation: "window_exceeded" });
   });
 
-  it("pings after a heartbeat of silence and gives up after two", async () => {
+  it("pings after a heartbeat of silence, and reconnects after two", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
-    const { conn, socket } = start();
+    const { conn, socket } = start({ reconnect: { delays: [100], jitter: 0 } });
     socket.open();
     await vi.advanceTimersByTimeAsync(0);
     socket.welcome({ heartbeat: 1000 });
@@ -142,7 +143,10 @@ describe("client", () => {
     expect(conn.state).toBe("open");
 
     await vi.advanceTimersByTimeAsync(2500);
-    expect(conn.state).toBe("closed");
+    expect(socket.closedWith?.code).toBe(4006);
+    expect(conn.state).toBe("reconnecting");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(FakeSocket.last).not.toBe(socket);
   });
 
   it("returns event credit to the window", async () => {

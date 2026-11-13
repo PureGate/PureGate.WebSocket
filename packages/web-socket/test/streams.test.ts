@@ -197,8 +197,8 @@ describe("downloads", () => {
     expect(sent(socket, FrameKind.Cancel)).toMatchObject([{ id: 1 }]);
   });
 
-  it("ends streams with connection_closed, including those still waiting to open", async () => {
-    const { conn, socket } = await opened({}, { streams: 1 });
+  it("ends streams with connection_closed when the connection closes for good, including those still waiting", async () => {
+    const { conn, socket } = await opened({ reconnect: false }, { streams: 1 });
     const open = conn.streams.feed.ticks().next();
     const waiting = conn.streams.feed.ticks().next();
     await settle();
