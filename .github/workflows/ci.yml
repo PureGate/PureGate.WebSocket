@@ -114,6 +114,12 @@ jobs:
       - name: Build
         run: yarn build
 
+      # The chat sample still compiles against the library and its generated contract.
+      - name: Sample
+        run: |
+          yarn workspace chat-web typecheck
+          yarn workspace chat-web build
+
       # What the client costs an app, minified and gzipped. Fails past the budget in scripts/size.ts.
       - name: Size budget
         if: matrix.os == 'ubuntu-26.04'

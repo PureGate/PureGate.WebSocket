@@ -13,3 +13,6 @@ artifacts/
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# The chat sample's built page.
+samples/chat/Chat.Server/wwwroot/

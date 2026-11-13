@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PureGate.WebSocket chat</title>
+    <style>
+      body { font: 16px/1.5 system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+      #messages { list-style: none; padding: 0; min-height: 12rem; }
+      #messages li { padding: 0.25rem 0; }
+      #messages b { margin-right: 0.5rem; }
+      #status, #typing { color: #666; font-size: 0.875rem; min-height: 1.3rem; }
+      form { display: flex; gap: 0.5rem; }
+      #text { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <h1>Room <span id="room"></span></h1>
+    <p id="status">Connecting…</p>
+    <ul id="messages"></ul>
+    <p id="typing"></p>
+    <form id="post">
+      <input id="text" autocomplete="off" placeholder="Say something" required maxlength="2000" />
+      <button type="submit">Send</button>
+    </form>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

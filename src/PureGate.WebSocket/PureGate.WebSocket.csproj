@@ -23,6 +23,11 @@
     <PackageId>PureGate.WebSocket</PackageId>
     <Description>Typed messaging between ASP.NET Core and browsers over WebSockets, with the dependency-free TypeScript client @puregate/web-socket.</Description>
     <PackageTags>websocket;rpc;realtime;browser;typescript;aspnetcore</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
 </Project>

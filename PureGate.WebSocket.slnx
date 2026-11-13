@@ -7,4 +7,5 @@
   <Project Path="src/PureGate.WebSocket.Benchmarks/PureGate.WebSocket.Benchmarks.csproj" />
   <Project Path="src/PureGate.WebSocket.Test/PureGate.WebSocket.Test.csproj" />
   <Project Path="src/PureGate.WebSocket.TestServer/PureGate.WebSocket.TestServer.csproj" />
+  <Project Path="samples/chat/Chat.Server/Chat.Server.csproj" />
 </Solution>

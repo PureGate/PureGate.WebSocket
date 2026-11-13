@@ -3,7 +3,8 @@
   "private": true,
   "packageManager": "yarn@4.18.1",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "samples/*/web"
   ],
   "scripts": {
     "build": "yarn workspace @puregate/web-socket build",

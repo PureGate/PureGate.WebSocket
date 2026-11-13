@@ -252,7 +252,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@puregate/web-socket@workspace:packages/web-socket":
+"@puregate/web-socket@workspace:*, @puregate/web-socket@workspace:packages/web-socket":
   version: 0.0.0-use.local
   resolution: "@puregate/web-socket@workspace:packages/web-socket"
   dependencies:
@@ -739,6 +739,17 @@ __metadata:
   checksum: 10c0/fd1bf7fc41295ba1eba18a44d68e204b3cb11b79c9ad51fd071de3ee85323c20d94afc07a386f1f5ff44a5da4a116614d419fc44a2d459e4b5b574aef9af4431
   languageName: node
   linkType: hard
+
+"chat-web@workspace:samples/chat/web":
+  version: 0.0.0-use.local
+  resolution: "chat-web@workspace:samples/chat/web"
+  dependencies:
+    "@puregate/web-socket": "workspace:*"
+    "@types/node": "npm:26.6.6"
+    typescript: "npm:7.0.2"
+    vite: "npm:8.3.8"
+  languageName: unknown
+  linkType: soft
 
 "chownr@npm:^3.0.0":
   version: 3.0.0
