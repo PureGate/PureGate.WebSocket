@@ -2,8 +2,9 @@ using PureGate.WebSocket.Hosting;
 
 namespace PureGate.WebSocket;
 
-// The connections on this server, for sending events to them from anywhere in the app. Covers every
-// PureGate.WebSocket endpoint; a connection only receives the events its endpoint maps.
+// The app's connections, for sending events to them from anywhere in the app. Covers every PureGate.WebSocket
+// endpoint; a connection only receives the events its endpoint maps. Sends reach this server's connections, and with
+// an IWebSocketBackplane those on the app's other servers too.
 public interface IWebSocketHub
 {
   WebSocketTarget All { get; }
@@ -15,6 +16,7 @@ public interface IWebSocketHub
 
   WebSocketTarget Connection(string connectionId);
 
+  // Finds a connection on this server only.
   bool TryGetConnection(string connectionId, out WebSocketConnection connection);
 }
 
@@ -40,13 +42,14 @@ public readonly struct WebSocketTarget
   // The same connections without this one, typically the sender's.
   public WebSocketTarget Except(WebSocketConnection connection) => new(Hub, Kind, Key, connection);
 
-  // Queues the event for every connection. Returns once it is queued, not once it arrived.
+  // Queues the event for every connection on this server, and with a backplane publishes it for the other servers.
+  // Returns once it is queued and published, not once it arrived. A backplane that fails to publish fails the send,
+  // after this server's connections got the event.
   public ValueTask SendAsync<T>(ServerEvent<T> serverEvent, T payload, CancellationToken cancellationToken = default)
   {
     if (Hub is null)
       throw new InvalidOperationException("This target was not made by a hub.");
 
-    Hub.Send(in this, serverEvent, payload);
-    return ValueTask.CompletedTask;
+    return Hub.SendAsync(in this, serverEvent, payload, cancellationToken);
   }
 }

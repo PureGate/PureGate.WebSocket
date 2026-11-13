@@ -21,8 +21,8 @@ PureGate.WebSocket connects browsers to ASP.NET Core over one WebSocket: typed c
 
 - **Fallback transports** such as Server-Sent Events or long polling. WebSocket only.
 - **Clients other than browsers.** The client also runs on Node 22 and later, which the tests use, but there is no .NET or mobile client.
-- **Scale-out across servers** in the first release. Groups and broadcasts reach the connections on one server. A backplane comes after the first release, as a separate package; a Redis one would bring its own dependency. Several instances still work: a resume reaches the right one through cookie affinity or the `route` parameter.
-- **Built-in codecs other than JSON.** Raw bytes work everywhere; MessagePack and similar are out.
+- **Built-in backplanes.** An app connects its servers over any backend through `IWebSocketBackplane`, but none ships with the library: a Redis one would bring its own dependency. A resume still reaches the instance that holds its session through cookie affinity or the `route` parameter.
+- **Built-in codecs other than JSON.** Raw bytes work everywhere, and an app brings MessagePack or another format through `IPayloadFormat`.
 - **Request batching.** Pipelining and coalescing already make separate calls cheap.
 
 ## How it fits together

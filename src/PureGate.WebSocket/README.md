@@ -47,7 +47,7 @@ conn.on.orders.shipped((shipped) => toast(`Order ${shipped.id} shipped`));
 - **A contract from your own types.** `MapContract` serves TypeScript generated from the server's JSON metadata, so names, casing and optional properties come out exactly as they go over the wire. Its hash tells a development server when a browser's copy is stale.
 - **Calls both ways.** `MapRequest` for the browser's calls, `InvokeAsync` for the server's calls into the browser, with deadlines and cancellation that reach the other side.
 - **Streams and uploads with flow control.** `MapStream` pulls an `IAsyncEnumerable<T>` only as fast as the browser reads. `MapUpload` hands the handler the browser's items as an `IAsyncEnumerable<T>`, read only as fast as it takes them: a file upload never fills the server's memory.
-- **Events,** to one connection, a user, a group or everyone through `IWebSocketHub`, and from the browser with `MapClientEvent`.
+- **Events,** to one connection, a user, a group or everyone through `IWebSocketHub`, and from the browser with `MapClientEvent`. With a [backplane](#several-servers) over any backend, they reach every server.
 - **Connections that survive the network.** A dropped connection resumes its session: calls, streams and events in progress carry on, and nothing is lost or repeated. A stopping server sends GoAway, finishes the calls in progress, and browsers move to another instance.
 - **Security.** Cookie or token authentication, token refresh without reconnecting, authorization policies per operation, filters, a rate limiter per connection, an origin check, and limits on every window and queue.
 - **Observability.** Metrics and traces named `PureGate.WebSocket`: add them with `AddMeter("PureGate.WebSocket")` and `AddSource("PureGate.WebSocket")`. A browser's `traceparent` continues into the handler's span.
@@ -104,6 +104,50 @@ const conn = connect<Contract>("/ws", { contractHash, format: { name: "msgpack",
 ```
 
 `contract.ts` describes each value as its JSON, so a format must read and write the same shapes: objects as maps keyed by their JSON property names, not as arrays. `byte[]` and `ReadOnlyMemory<byte>` stay raw bytes in every format, and error details stay JSON. `Read` gets a slice of the received message, which is reused once it returns, so the value it reads must not keep that memory.
+
+## Several servers
+
+`IWebSocketHub` reaches the connections of the server it runs on. Register an `IWebSocketBackplane`, and `All`, `User` and `Group` reach every server, each delivering to its own connections; `Connection(id)` reaches the server the connection is on. A backplane only moves bytes on topics, so one for any backend is short. Over Redis, with StackExchange.Redis:
+
+```csharp
+sealed class RedisBackplane(IConnectionMultiplexer redis) : IWebSocketBackplane
+{
+  readonly ConcurrentDictionary<string, ChannelMessageQueue> Subscriptions = new();
+  Action<ReadOnlyMemory<byte>> Receive;
+
+  public async Task ReceiveAsync(Action<ReadOnlyMemory<byte>> receive, CancellationToken cancellationToken)
+  {
+    Receive = receive;
+    await Task.Delay(Timeout.Infinite, cancellationToken);
+  }
+
+  public async ValueTask SubscribeAsync(string topic, CancellationToken cancellationToken)
+  {
+    var queue = await redis.GetSubscriber().SubscribeAsync(Channel(topic));
+    queue.OnMessage(message => Receive(message.Message));
+    Subscriptions[topic] = queue;
+  }
+
+  public async ValueTask UnsubscribeAsync(string topic, CancellationToken cancellationToken)
+  {
+    if (Subscriptions.TryRemove(topic, out var queue))
+      await queue.UnsubscribeAsync();
+  }
+
+  public async ValueTask PublishAsync(string topic, ReadOnlyMemory<byte> message, CancellationToken cancellationToken) =>
+    await redis.GetSubscriber().PublishAsync(Channel(topic), message);
+
+  static RedisChannel Channel(string topic) => RedisChannel.Literal("puregate:" + topic);
+}
+
+builder.Services.AddSingleton<IWebSocketBackplane>(new RedisBackplane(ConnectionMultiplexer.Connect("localhost")));
+```
+
+- **Topics.** A server subscribes to `all`, to its own server's topic, and to the topic of each user and group while it has connections for them, so it receives only events it can deliver. A backend without cheap topics can make `SubscribeAsync` and `UnsubscribeAsync` do nothing and deliver every message to every server: the hub drops those no connection takes. Topics are any strings, as user ids and group names are.
+- **Order.** The messages one server publishes to a topic must arrive in the order it published them, as one Redis connection and one `ChannelMessageQueue` keep them.
+- **Delivery.** `SendAsync` returns once the event is queued here and published. A failed publish throws, after this server's connections got the event. Between servers, delivery is at most once: what the backend loses is lost.
+- **Failures.** Reconnecting is the backplane's work: StackExchange.Redis reconnects and subscribes again on its own. A subscription that throws is retried. A `ReceiveAsync` that ends before the app stops fails the host, as a failed `BackgroundService` does.
+- **Limits.** `TryGetConnection` and `InvokeAsync` stay on one server, and a resume still has to reach the server that holds the session, through cookie affinity or `ResumeRoute`. Each `ServerEvent` needs a name of its own across the app's endpoints.
 
 ## Options
 

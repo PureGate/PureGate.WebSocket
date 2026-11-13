@@ -68,4 +68,16 @@ static partial class Log
 
   [LoggerMessage(21, LogLevel.Debug, "Connection {ConnectionId} is over its rate limit.")]
   public static partial void RateLimited(ILogger logger, string connectionId);
+
+  [LoggerMessage(22, LogLevel.Warning, "The backplane failed to {Change} the topic {Topic}; trying again in {Retry}.")]
+  public static partial void BackplaneSubscriptionFailed(ILogger logger, string change, string topic, TimeSpan retry, Exception exception);
+
+  [LoggerMessage(23, LogLevel.Warning, "Dropped a message from the backplane that could not be read.")]
+  public static partial void BackplaneMessageDropped(ILogger logger, Exception exception);
+
+  [LoggerMessage(24, LogLevel.Debug, "Dropped a message from the backplane for the event {Event}, which no endpoint on this server maps.")]
+  public static partial void BackplaneEventNotMapped(ILogger logger, string @event);
+
+  [LoggerMessage(25, LogLevel.Warning, "The event {Event} from the backplane could not be read, so the connections that take it in another format or from another endpoint did not get it.")]
+  public static partial void BackplanePayloadUnreadable(ILogger logger, string @event, Exception exception);
 }

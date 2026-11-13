@@ -12,7 +12,8 @@ namespace PureGate.WebSocket;
 
 public static class PureGateWebSocketExtensions
 {
-  // Registers the hub and the options every endpoint starts from.
+  // Registers the hub and the options every endpoint starts from. An IWebSocketBackplane registered as a service, in
+  // any order, connects the hub to the app's other servers.
   public static IServiceCollection AddPureGateWebSocket(
       this IServiceCollection services,
       Action<PureGateWebSocketOptions> configure = null)
@@ -22,7 +23,8 @@ public static class PureGateWebSocketExtensions
     if (configure is not null)
       services.Configure(configure);
 
-    services.TryAddSingleton<WebSocketHub>();
+    services.TryAddSingleton(static provider => new WebSocketHub(provider.GetService<IWebSocketBackplane>(), provider.GetService<ILoggerFactory>()));
+    services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, BackplaneService>());
     services.TryAddSingleton<IWebSocketHub>(static provider => provider.GetRequiredService<WebSocketHub>());
     services.TryAddSingleton(static provider => new Diagnostics.Telemetry(provider.GetService<System.Diagnostics.Metrics.IMeterFactory>()));
     return services;

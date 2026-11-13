@@ -72,7 +72,7 @@ Events the server sends and requests the browser handles are declared once as st
 
 | API | Purpose |
 |---|---|
-| `services.AddPureGateWebSocket(configure)` | Registers the hub and the options shared by every endpoint. |
+| `services.AddPureGateWebSocket(configure)` | Registers the hub and the options shared by every endpoint. An `IWebSocketBackplane` registered as a service connects the hub to the app's other servers (see [Deploys and several instances](#deploys-and-several-instances)). |
 | `app.MapPureGateWebSocket(pattern, configure?)` | Maps a WebSocket endpoint and returns a `WebSocketEndpointBuilder`. `configure` overrides options for this endpoint. The route accepts any HTTP method, so WebSockets over HTTP/2 (CONNECT) match too. |
 | `WebSocketEndpointBuilder` | Implements `IEndpointConventionBuilder`, so `RequireAuthorization`, `RequireHost` and the other conventions apply to the upgrade request. |
 | `MapGroup(prefix)` | A builder whose names start with `prefix.`. Groups nest. |
@@ -100,7 +100,8 @@ Handlers are plain `Func`s, so the `MapRequest` overloads tell themselves apart 
 |---|---|
 | `WebSocketCall` | `Connection`, `User`, `Name`, `TraceParent`, and `Services`, a DI scope created only if the handler touches it. Like `HttpContext`, it is valid only until the handler finishes. |
 | `WebSocketConnection` | `Id`, `User`, `Items`, `Groups` (`Add`, `Remove`, `Contains`), `SendAsync(ServerEvent<T>, T)`, `InvokeAsync(ClientRequest<TRequest, TResponse>, TRequest, ct, timeout?)`, `CloseAsync(code?)`, and `Closed`, a token that fires when the session ends. `HttpContext` is the current transport's, which changes after a resume. |
-| `IWebSocketHub` | `All`, `User(id)`, `Group(name)`, `Connection(id)`, each a `WebSocketTarget` with `SendAsync(ServerEvent<T>, T)` and `Except(connection)`. It covers every endpoint in the app; a connection only receives the events its endpoint maps. |
+| `IWebSocketHub` | `All`, `User(id)`, `Group(name)`, `Connection(id)`, each a `WebSocketTarget` with `SendAsync(ServerEvent<T>, T)` and `Except(connection)`. It covers every endpoint in the app; a connection only receives the events its endpoint maps. With a backplane, sends reach every server; `TryGetConnection` finds this server's connections only. |
+| `IWebSocketBackplane` | `ReceiveAsync`, `SubscribeAsync`, `UnsubscribeAsync` and `PublishAsync`: moves the hub's messages between servers on topics, over any backend. |
 | `ServerEvent<T>`, `ClientRequest<TRequest, TResponse>` | Descriptors: a name and types, created once, usually as static fields. Sending an event that no endpoint maps throws. |
 | `CallException(code, message, details?)` | Fails a call with an application error code and optional JSON details. |
 | `IPayloadFormat` | `Name`, `Write<T>` and `Read<T>`: a payload format besides JSON, such as MessagePack, over any library. |
@@ -163,7 +164,7 @@ src/PureGate.WebSocket/
   Serialization/  payload codecs, handshake JSON
   Transport/      Outbox (send queue, coalescing, Acks), ReplayBuffer, PooledBuffer
   Hosting/        EndpointState (upgrade, operation registry), operations, stream and event state, pending calls to
-                  the browser, WebSocketHub
+                  the browser, WebSocketHub, and HubBackplane, its side of a backplane
   Contracts/      schema export, TypeScript emitter, canonical hash
   Diagnostics/    Meter, ActivitySource, source-generated log messages
 ```
@@ -282,7 +283,13 @@ export const contractHash = "9f3a1c0b7d2e4a65";
   - setting `ResumeRoute` to the instance's id, which the client adds to the reconnect URL as the `route` query parameter for the load balancer to route on.
 
   Without either, a resume that reaches another instance fails safely with `resumed: false`.
-- **Groups and broadcasts** reach the connections on one instance. Reaching all instances needs a backplane, planned after the first release.
+- **Groups and broadcasts** reach the connections on one instance, unless the app registers an `IWebSocketBackplane`. None ships with the library; one over Redis, NATS, Kafka or a database moves bytes on topics, and the hub does the rest:
+  - **Topics.** Each instance subscribes to `all`, to `server:{id}` with an id new at each start, and to `user:{id}` and `group:{name}` while it has connections for them. A user or group is subscribed when its first connection on the instance arrives and unsubscribed when its last one leaves. One reconcile per topic keeps the backplane's calls in order, and a call that fails is retried, from 1 s up to 30 s apart. A backend without cheap topics may ignore the subscriptions and deliver everything: the hub drops what no connection takes.
+  - **Sending.** The instance delivers to its own connections as before, then publishes to the target's topic. `Connection(id)` publishes only when the connection is elsewhere: ids start with their instance's id, so the message goes to that instance's topic. `SendAsync` waits for the publish, and a failed publish throws after the local connections got the event.
+  - **The message.** A version byte, the sender's id, the target, the event's name, and the payload once: JSON as the event's first mapping writes it, or its raw bytes. The local connections of that mapping take the same bytes, so the payload is serialized once for both. With a backplane, an event's name stands for one `ServerEvent` across endpoints, which `MapEvent` checks.
+  - **Receiving.** An instance skips its own messages and delivers the others to its connections of the target. JSON and byte connections take the payload as it is; it is deserialized only for a connection in another format or on another endpoint. A message that cannot be read is logged and dropped.
+  - **Guarantees.** What one instance publishes to a topic arrives in order. Between instances, delivery is at most once: what the backend loses is lost. `TryGetConnection` and calls to the browser stay on one instance, and a resume still has to reach the instance that holds the session.
+  - **Lifetime.** A hosted service runs `ReceiveAsync` for the app's lifetime. Reconnecting is the backplane's work; one whose `ReceiveAsync` ends early fails the host, as a failed `BackgroundService` does.
 
 ## Testing
 

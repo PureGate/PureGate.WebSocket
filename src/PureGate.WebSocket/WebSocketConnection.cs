@@ -27,7 +27,7 @@ public sealed partial class WebSocketConnection
     Endpoint = endpoint;
     HttpContext = link.Context;
     User = link.Context.User;
-    Id = NewId(9);
+    Id = endpoint.Hub.NewConnectionId();
     SessionId = NewId(16);
     Groups = new WebSocketGroups(this);
     Names = new IncomingNameTable<Operation>(endpoint.ResolveName);
@@ -40,8 +40,8 @@ public sealed partial class WebSocketConnection
     Events = options.EventOrdering == EventOrdering.Sequential ? new EventQueue(this) : null;
   }
 
-  // The connection's id: unique on this server, safe to log, and sent to the browser in Welcome. It stays the same
-  // when the browser resumes.
+  // The connection's id: unique, safe to log, and sent to the browser in Welcome. It stays the same when the browser
+  // resumes. With a backplane, it starts with its server's id and a dot.
   public string Id { get; }
 
   // The user of the latest upgrade request: a resume must be by the same user.
@@ -133,7 +133,7 @@ public sealed partial class WebSocketConnection
     CloseLink((WebSocketCloseStatus)CloseCodes.SlowConsumer, "The client fell too far behind.", endsSession: false, discard: true);
   }
 
-  static string NewId(int bytes) => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(bytes));
+  internal static string NewId(int bytes) => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(bytes));
 }
 
 // The protocol's own close codes (docs/PROTOCOL.md, Closing).

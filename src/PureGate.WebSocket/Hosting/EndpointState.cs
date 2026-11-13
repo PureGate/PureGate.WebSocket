@@ -130,6 +130,7 @@ sealed class EndpointState
     lock (Gate)
     {
       EnsureNotStarted();
+      Hub.EventMapped(info);
       if (!EventInfos.TryAdd(descriptor, info))
         throw new InvalidOperationException($"The event '{descriptor.Name}' is mapped twice on this endpoint.");
     }

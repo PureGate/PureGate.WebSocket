@@ -72,7 +72,13 @@ sealed class TestHost : IAsyncDisposable
 
   public async ValueTask DisposeAsync()
   {
-    await App.StopAsync();
-    await App.DisposeAsync();
+    try
+    {
+      await App.StopAsync();
+    }
+    finally
+    {
+      await App.DisposeAsync();
+    }
   }
 }

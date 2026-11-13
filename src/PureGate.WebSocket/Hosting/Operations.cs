@@ -391,8 +391,14 @@ interface IOutgoingMember
   Type ResponseType { get; }
 }
 
+// An event from another server, which the hub knows only by its name until the event's type takes over.
+interface IRelayedEvent
+{
+  void Relay(WebSocketHub hub, in BackplaneMessage read, ReadOnlyMemory<byte> payload);
+}
+
 // The browser-facing side of a ServerEvent: its name and how its payload is written.
-sealed class ServerEventInfo<T>(ServerEvent<T> descriptor, PayloadCodec<T>[] codecs) : IOutgoingMember
+sealed class ServerEventInfo<T>(ServerEvent<T> descriptor, PayloadCodec<T>[] codecs) : IOutgoingMember, IRelayedEvent
 {
   public ServerEvent<T> Descriptor { get; } = descriptor;
 
@@ -404,6 +410,8 @@ sealed class ServerEventInfo<T>(ServerEvent<T> descriptor, PayloadCodec<T>[] cod
   public Type RequestType => typeof(T);
 
   public Type ResponseType => typeof(NoPayload);
+
+  public void Relay(WebSocketHub hub, in BackplaneMessage read, ReadOnlyMemory<byte> payload) => hub.Relay(this, in read, payload);
 }
 
 // The browser-facing side of a ClientRequest: its name and how its payloads are read and written.
