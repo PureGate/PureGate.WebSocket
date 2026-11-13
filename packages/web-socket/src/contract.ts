@@ -52,7 +52,10 @@ export interface CallStream<T> extends AsyncIterableIterator<T, undefined> {
   cancel(): void;
 }
 
-/** What an upload reads its items from. The source is read only as fast as the server takes items. */
+/**
+ * What an upload reads its items from, only as fast as the server takes them. A ReadableStream's byte chunks are split
+ * to fit the server's messages, as file.stream() needs; an iterable's items go as they are.
+ */
 export type UploadSource<T> = AsyncIterable<T> | Iterable<T> | ReadableStream<T>;
 
 /** What a browser-side handler gets besides the payload. */

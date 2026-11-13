@@ -172,6 +172,13 @@ describe("uploads", () => {
     expect(await conn.uploads.store.size(source)).toBe(1005);
   });
 
+  it("uploads a Blob's stream, whose chunks are larger than a message", async () => {
+    const conn = open();
+    const bytes = new Uint8Array(1_000_000).map((_, i) => i % 251);
+
+    expect(await conn.uploads.store.size(new Blob([bytes]).stream())).toBe(1_000_000);
+  });
+
   it("uploads without a result", async () => {
     const conn = open();
 

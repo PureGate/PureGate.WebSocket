@@ -32,6 +32,9 @@ const initialEvents = 16;
 const initialStreams = 1;
 const minimumMessage = 16 * 1024;
 
+// The most a StreamItem takes besides its payload: the length prefix, the kind, the flags and the id, at their longest.
+const streamItemOverhead = 5 + 1 + 1 + 5;
+
 // The longest name code, to measure a frame before its name is numbered.
 const longestNameCode = 2 * nameTableLimit + 1;
 
@@ -148,6 +151,7 @@ class ConnectionCore {
       item: (id, payload) => this.#writeItem(id, payload),
       end: (id, error) => this.#writeEnd(id, error),
       release: (id) => this.#releaseUpload(id),
+      maxItemBytes: () => this.#serverMaxMessage - streamItemOverhead,
     };
 
     const opened = Promise.withResolvers<void>();

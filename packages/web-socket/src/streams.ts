@@ -16,6 +16,8 @@ export interface StreamHost {
   cancel(id: number): void;
   /** False when the item is larger than the server accepts. */
   item(id: number, payload: Payload): boolean;
+  /** The largest binary item that always fits in one of the server's messages. */
+  maxItemBytes(): number;
   end(id: number, error: CallError | undefined): void;
   /** Both sides are done with an upload: its id and its place in the window are free. */
   release(id: number): void;
@@ -233,12 +235,27 @@ export function isSource(value: unknown): value is UploadSource<unknown> {
   );
 }
 
-function readerOf(source: UploadSource<unknown>): SourceReader {
+// A ReadableStream's byte chunks are split into pieces of at most maxPiece() bytes: browsers choose those chunks, a
+// Blob's can be the whole file, so their boundaries mean nothing. An iterable's items are the application's own, and
+// go as they are.
+function readerOf(source: UploadSource<unknown>, maxPiece: () => number): SourceReader {
   // A ReadableStream first: not every browser makes one async-iterable.
   if (typeof (source as ReadableStream).getReader === "function") {
     const reader = (source as ReadableStream<unknown>).getReader();
+    let rest: Uint8Array | undefined;
     return {
-      next: () => reader.read() as Promise<IteratorResult<unknown>>,
+      next: async () => {
+        if (rest === undefined) {
+          const result = await reader.read();
+          if (result.done || !(result.value instanceof Uint8Array)) return result as IteratorResult<unknown>;
+          rest = result.value;
+        }
+
+        const limit = maxPiece();
+        const piece = rest.length <= limit ? rest : rest.subarray(0, limit);
+        rest = piece === rest ? undefined : rest.subarray(limit);
+        return { value: piece, done: false };
+      },
       release: () => void reader.cancel().catch(() => undefined),
     };
   }
@@ -305,7 +322,7 @@ export class Upload implements Exchange {
     this.promise = promise;
     this.#resolve = resolve;
     this.#reject = reject;
-    this.#source = readerOf(source);
+    this.#source = readerOf(source, () => host.maxItemBytes());
 
     if (signal?.aborted) {
       this.#state = "done";

@@ -378,6 +378,32 @@ describe("uploads", () => {
     expect(sent(socket, FrameKind.Cancel)).toMatchObject([{ id: 1 }]);
   });
 
+  it("splits a ReadableStream's chunks to fit the server's messages, and sends an iterable's items as they are", async () => {
+    const { conn, socket } = await opened({}, { maxMessage: 16 * 1024 });
+    const chunk = new Uint8Array(40_000).map((_, i) => i % 7);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(chunk);
+        controller.close();
+      },
+    });
+
+    void conn.uploads.store.put("file", stream).catch(() => undefined);
+    await settle();
+    socket.receive(frame(FrameKind.Credit, { id: 1, amount: 10 }));
+    await settle();
+
+    const pieces = sent(socket, FrameKind.StreamItem).map((each) => each.payload);
+    expect(pieces.map((piece) => piece.length)).toEqual([16_372, 16_372, 7256]);
+    expect(pieces.every((piece) => piece.length + 12 <= 16 * 1024)).toBe(true);
+    expect(new Uint8Array(pieces.flatMap((piece) => [...piece]))).toEqual(chunk);
+
+    const large = conn.uploads.store.put("file", [new Uint8Array(20_000)]);
+    await settle();
+    socket.receive(frame(FrameKind.Credit, { id: 2, amount: 1 }));
+    await expect(large).rejects.toMatchObject({ code: "payload_too_large" });
+  });
+
   it("tells a request from a source", async () => {
     const { conn, socket } = await opened();
     conn.uploads.store.put("name.bin", [Uint8Array.of(1)]).catch(() => undefined);
