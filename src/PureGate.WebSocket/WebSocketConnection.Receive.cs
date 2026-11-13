@@ -2,86 +2,171 @@ using System.Buffers;
 using System.Net.WebSockets;
 using System.Text.Json;
 using PureGate.WebSocket.Diagnostics;
+using PureGate.WebSocket.Hosting;
 using PureGate.WebSocket.Protocol;
 using PureGate.WebSocket.Serialization;
 using PureGate.WebSocket.Transport;
 
 namespace PureGate.WebSocket;
 
-// Receiving: the handshake, then one message at a time. Frames are handled synchronously on this loop: payloads
-// are read before the buffer is reused, and handlers go to the thread pool.
+// Receiving: the handshake, then one message at a time. Frames are handled synchronously on the receive loop, under
+// the link lock: payloads are read before the buffer is reused, handlers go to the thread pool, and a resume can
+// never meet a message half processed.
 public sealed partial class WebSocketConnection
 {
   const int FirstReceiveBytes = 4096;
 
-  byte[] ReceiveBuffer;
-  volatile bool HelloReceived;
-  volatile bool Closing;
+  readonly Lock LinkGate = new();
+  Link CurrentLink;
+
+  // Welcome went out: the session is the browser's, and resumable if resume is on.
+  bool Started;
+
+  // The OnConnected handlers ran: the hub knows the session, and OnDisconnected runs at its end.
   bool Connected;
 
-  internal async Task RunAsync()
+  string ContractStatus;
+
+  // Accepts one WebSocket: a new session, or the resume of one the endpoint still has.
+  internal static Task AcceptAsync(EndpointState endpoint, Link link) => new WebSocketConnection(endpoint, link).RunAsync(link);
+
+  async Task RunAsync(Link link)
   {
-    ReceiveBuffer = ArrayPool<byte>.Shared.Rent(FirstReceiveBytes);
+    link.ReceiveBuffer = ArrayPool<byte>.Shared.Rent(FirstReceiveBytes);
+    HelloMessage hello;
+    byte[] pipelined;
     try
     {
-      if (await HandshakeAsync())
-      {
-        while (true)
-        {
-          var length = await ReceiveMessageAsync();
-          if (length < 0)
-            break;
-          if (!Closing)
-            Process(ReceiveBuffer.AsSpan(0, length));
-        }
-      }
-
-      // The browser closed: answer its close frame.
-      Outbox.Close(WebSocketCloseStatus.NormalClosure, "");
+      (hello, pipelined) = await ReceiveHelloAsync(link);
+      if (hello is not null)
+        ContractStatus = CheckContract(hello.Contract);
     }
     catch (ProtocolException exception)
     {
       Log.ProtocolViolation(Logger, Id, exception.Violation, exception.Message);
-      await CloseAndDrainAsync((WebSocketCloseStatus)CloseCodes.ProtocolError, exception.Message);
+      await CloseAndDrainAsync(link, (WebSocketCloseStatus)CloseCodes.ProtocolError, exception.Message);
+      hello = null;
+      pipelined = null;
     }
     catch (CloseException exception)
     {
-      await CloseAndDrainAsync(exception.Status, exception.Message);
+      await CloseAndDrainAsync(link, exception.Status, exception.Message);
+      hello = null;
+      pipelined = null;
     }
-    catch (Exception exception) when (exception is WebSocketException or OperationCanceledException or ObjectDisposedException)
+    catch (Exception exception) when (IsTransportFailure(exception))
     {
-      // The transport is gone.
+      hello = null;
+      pipelined = null;
+    }
+
+    if (hello is null)
+    {
+      link.EndsSession = true;
+      await LinkEndedAsync(link);
+      return;
+    }
+
+    if (hello.Resume?.Session is { } sessionId
+      && Options.ResumeWindow > TimeSpan.Zero
+      && Endpoint.Sessions.TryGetValue(sessionId, out var session))
+    {
+      switch (session.Resume(link, hello, ContractStatus))
+      {
+        case ResumeOutcome.Resumed:
+          // This session was only a stand-in until the right one was found.
+          Outbox.End();
+          await session.RunLinkAsync(link, null, null);
+          return;
+        case ResumeOutcome.Unavailable:
+          _ = session.EndAsync();
+          break;
+      }
+    }
+
+    await RunLinkAsync(link, hello, pipelined);
+  }
+
+  // Runs link until it ends. hello is set for a new session, which starts here; a resumed one has started already.
+  async Task RunLinkAsync(Link link, HelloMessage hello, byte[] pipelined)
+  {
+    try
+    {
+      if (hello is null || await StartAsync(link, hello, pipelined))
+      {
+        await ReceiveLoopAsync(link);
+
+        // The browser closed: answer its close frame. A close it started ends the session, unless the page is going
+        // away (1001) or the client will resume (4006). One that answers the server's close says nothing of its own.
+        if (!link.Closing)
+          link.EndsSession |= link.Socket.CloseStatus is not (WebSocketCloseStatus.EndpointUnavailable or (WebSocketCloseStatus)CloseCodes.Reconnecting);
+        Outbox.Close(link, WebSocketCloseStatus.NormalClosure, "");
+      }
+    }
+    catch (ProtocolException exception)
+    {
+      Log.ProtocolViolation(Logger, Id, exception.Violation, exception.Message);
+      link.EndsSession = true;
+      await CloseAndDrainAsync(link, (WebSocketCloseStatus)CloseCodes.ProtocolError, exception.Message);
+    }
+    catch (CloseException exception)
+    {
+      link.EndsSession = true;
+      await CloseAndDrainAsync(link, exception.Status, exception.Message);
+    }
+    catch (Exception exception) when (IsTransportFailure(exception))
+    {
+      // The connection dropped. The session stays, if it can resume.
     }
     finally
     {
-      ArrayPool<byte>.Shared.Return(ReceiveBuffer);
-      ReceiveBuffer = [];
-      await EndAsync();
+      await LinkEndedAsync(link);
     }
   }
 
-  async Task<bool> HandshakeAsync()
+  static bool IsTransportFailure(Exception exception) =>
+    exception is WebSocketException or OperationCanceledException or ObjectDisposedException;
+
+  async Task<(HelloMessage Hello, byte[] Pipelined)> ReceiveHelloAsync(Link link)
   {
     int length;
     using (var timeout = new CancellationTokenSource(Options.HandshakeTimeout))
-    using (timeout.Token.Register(static state => ((WebSocketConnection)state).HandshakeTimedOut(), this))
+    using (timeout.Token.Register(HandshakeTimedOut, link))
     {
-      length = await ReceiveMessageAsync();
-      if (length < 0 || Closing)
-        return false;
+      length = await ReceiveMessageAsync(link);
+      if (length < 0 || link.Closing)
+        return (null, null);
 
-      HelloReceived = true;
+      link.HelloReceived = true;
     }
 
-    var hello = ReadFirstMessage(ReceiveBuffer.AsSpan(0, length), out var pipelined);
-    ContractStatus = CheckContract(hello.Contract);
+    var hello = ReadFirstMessage(link.ReceiveBuffer.AsSpan(0, length), out var pipelined);
+    return (hello, pipelined);
+  }
+
+  void HandshakeTimedOut(object state)
+  {
+    var link = (Link)state;
+    if (!link.HelloReceived)
+      Outbox.Close(link, (WebSocketCloseStatus)CloseCodes.HandshakeTimeout, "No Hello in time.");
+  }
+
+  // A new session: Welcome first, then the OnConnected handlers, then the frames that came with Hello. Those wait for
+  // the handlers, which may set up groups they rely on. False when a handler failed.
+  async Task<bool> StartAsync(Link link, HelloMessage hello, byte[] pipelined)
+  {
     UserId = Options.UserId(User);
     Outbox.MaxMessage = hello.MaxMessage;
     ClientCallSlots = new SemaphoreSlim(hello.Calls, hello.Calls);
 
-    // Welcome is the first frame the browser gets, so it goes out before anything can send events here. The
-    // pipelined calls still wait for the OnConnected handlers, which may set up groups they rely on.
-    SendWelcome();
+    lock (LinkGate)
+    {
+      CurrentLink = link;
+      Started = true;
+      AttachWelcome(link, resumed: false, received: 0);
+    }
+
+    Endpoint.Sessions.TryAdd(SessionId, this);
     Endpoint.Hub.Add(this);
     Connected = true;
     foreach (var handler in Endpoint.Connected)
@@ -93,21 +178,41 @@ public sealed partial class WebSocketConnection
       catch (Exception exception)
       {
         Log.ConnectedHandlerFailed(Logger, Id, exception);
-        await CloseAndDrainAsync(WebSocketCloseStatus.InternalServerError, "The server failed to set up the connection.");
+        link.EndsSession = true;
+        await CloseAndDrainAsync(link, WebSocketCloseStatus.InternalServerError, "The server failed to set up the connection.");
         return false;
       }
     }
 
     if (pipelined.Length > 0)
-      Process(pipelined);
+    {
+      lock (LinkGate)
+      {
+        if (CurrentLink == link)
+          Process(pipelined);
+      }
+    }
 
     return true;
   }
 
-  void HandshakeTimedOut()
+  async Task ReceiveLoopAsync(Link link)
   {
-    if (!HelloReceived)
-      Close((WebSocketCloseStatus)CloseCodes.HandshakeTimeout, "No Hello in time.");
+    while (true)
+    {
+      var length = await ReceiveMessageAsync(link);
+      if (length < 0)
+        return;
+
+      lock (LinkGate)
+      {
+        // Replaced by a resume: the session counts nothing more from here.
+        if (CurrentLink != link)
+          return;
+        if (!link.Closing)
+          Process(link.ReceiveBuffer.AsSpan(0, length));
+      }
+    }
   }
 
   // The first message starts with Hello. Whatever follows it was pipelined, and is handled after Welcome.
@@ -126,7 +231,7 @@ public sealed partial class WebSocketConnection
     {
     }
 
-    if (hello is null || hello.Calls < 1 || hello.MaxMessage < 16 * 1024)
+    if (hello is null || hello.Calls < 1 || hello.MaxMessage < 16 * 1024 || hello.Resume is { Received: < 0 })
       ProtocolException.Throw(ProtocolViolation.InvalidHandshake);
 
     pipelined = reader.Remaining.ToArray();
@@ -161,20 +266,23 @@ public sealed partial class WebSocketConnection
     return "stale";
   }
 
-  string ContractStatus;
-
-  void SendWelcome()
+  // Attaches link with its Welcome, which goes before anything else on it. Called under LinkGate.
+  bool AttachWelcome(Link link, bool resumed, long received)
   {
     var welcome = new WelcomeMessage
     {
       Connection = Id,
-      Session = NewId(16),
+      Session = SessionId,
+      Resumed = resumed,
+      Received = resumed ? ReceivedCount : 0,
       Calls = Options.MaxConcurrentCalls,
       Streams = Options.MaxStreams,
       Events = Options.EventWindow,
       MaxMessage = Options.MaxMessageBytes,
       Heartbeat = (long)Options.Heartbeat.TotalMilliseconds,
+      ResumeWindow = (long)Options.ResumeWindow.TotalMilliseconds,
       Contract = ContractStatus,
+      Route = Options.ResumeRoute,
     };
 
     var buffer = new PooledBuffer(256);
@@ -184,7 +292,7 @@ public sealed partial class WebSocketConnection
         JsonSerializer.Serialize(writer, welcome, HandshakeJson.Default.WelcomeMessage);
 
       var frame = new Frame { Kind = FrameKind.Welcome, Payload = buffer.WrittenSpan };
-      Write(in frame);
+      return Outbox.Attach(link, in frame, received);
     }
     finally
     {
@@ -195,8 +303,12 @@ public sealed partial class WebSocketConnection
   void Process(ReadOnlySpan<byte> message)
   {
     var reader = new FrameReader(message, Side.Client);
+    var sequenced = 0;
     while (reader.TryRead(out var frame))
     {
+      if (FrameLayout.IsSequenced(frame.Kind))
+        sequenced++;
+
       switch (frame.Kind)
       {
         case FrameKind.Request:
@@ -223,22 +335,29 @@ public sealed partial class WebSocketConnection
         case FrameKind.Cancel:
           OnCancel(frame.Id);
           break;
+        case FrameKind.Ack:
+          if (!Outbox.Acknowledge(frame.Count))
+            ProtocolException.Throw(ProtocolViolation.UnexpectedFrame);
+          break;
         case FrameKind.Ping:
           var pong = new Frame { Kind = FrameKind.Pong };
-          Write(in pong);
+          Outbox.Write(in pong);
           break;
         case FrameKind.Pong:
-        case FrameKind.Ack:
           break;
         default:
           ProtocolException.Throw(ProtocolViolation.UnexpectedFrame);
           break;
       }
     }
+
+    // A message counts once all of it is processed.
+    if (sequenced > 0)
+      Processed(sequenced);
   }
 
-  // Receives one whole message into ReceiveBuffer and returns its length, or -1 when the browser closed.
-  async ValueTask<int> ReceiveMessageAsync()
+  // Receives one whole message into the link's buffer and returns its length, or -1 when the browser closed.
+  async ValueTask<int> ReceiveMessageAsync(Link link)
   {
     var limit = Options.MaxMessageBytes;
     var length = 0;
@@ -247,16 +366,16 @@ public sealed partial class WebSocketConnection
       if (length == limit)
         throw new CloseException(WebSocketCloseStatus.MessageTooBig, $"Messages are limited to {limit} bytes.");
 
-      if (length == ReceiveBuffer.Length)
+      if (length == link.ReceiveBuffer.Length)
       {
         var grown = ArrayPool<byte>.Shared.Rent(Math.Min(limit, length * 2));
-        ReceiveBuffer.AsSpan(0, length).CopyTo(grown);
-        ArrayPool<byte>.Shared.Return(ReceiveBuffer);
-        ReceiveBuffer = grown;
+        link.ReceiveBuffer.AsSpan(0, length).CopyTo(grown);
+        ArrayPool<byte>.Shared.Return(link.ReceiveBuffer);
+        link.ReceiveBuffer = grown;
       }
 
-      var room = Math.Min(ReceiveBuffer.Length, limit) - length;
-      var result = await Socket.ReceiveAsync(ReceiveBuffer.AsMemory(length, room), CancellationToken.None);
+      var room = Math.Min(link.ReceiveBuffer.Length, limit) - length;
+      var result = await link.Socket.ReceiveAsync(link.ReceiveBuffer.AsMemory(length, room), CancellationToken.None);
       if (result.MessageType == WebSocketMessageType.Close)
         return -1;
       if (result.MessageType == WebSocketMessageType.Text)
@@ -269,68 +388,26 @@ public sealed partial class WebSocketConnection
   }
 
   // Sends a close frame, then waits a moment for the browser's, so the close code reaches it instead of a reset.
-  async Task CloseAndDrainAsync(WebSocketCloseStatus status, string reason)
+  async Task CloseAndDrainAsync(Link link, WebSocketCloseStatus status, string reason)
   {
-    Close(status, reason);
+    Outbox.Close(link, status, reason);
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
     try
     {
       while (true)
       {
-        var result = await Socket.ReceiveAsync(ReceiveBuffer.AsMemory(), timeout.Token);
+        var result = await link.Socket.ReceiveAsync(link.ReceiveBuffer.AsMemory(), timeout.Token);
         if (result.MessageType == WebSocketMessageType.Close)
           return;
       }
     }
-    catch (Exception exception) when (exception is WebSocketException or OperationCanceledException or ObjectDisposedException)
+    catch (Exception exception) when (IsTransportFailure(exception))
     {
     }
-  }
-
-  async Task EndAsync()
-  {
-    if (Interlocked.Exchange(ref Ended, 1) != 0)
-      return;
-
-    await SessionCancellation.CancelAsync();
-    FailInvokes();
-    FinishStreams();
-    if (Connected)
-    {
-      Endpoint.Hub.Remove(this);
-      foreach (var handler in Endpoint.Disconnected)
-      {
-        try
-        {
-          await handler(this, CancellationToken.None);
-        }
-        catch (Exception exception)
-        {
-          Log.DisconnectedHandlerFailed(Logger, Id, exception);
-        }
-      }
-    }
-
-    // Let the close frame and anything before it go out, but not forever, and not on a socket that can no
-    // longer carry it.
-    if (Socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
-    {
-      Outbox.Close(WebSocketCloseStatus.NormalClosure, "");
-      try
-      {
-        await Outbox.Completion.WaitAsync(TimeSpan.FromSeconds(5));
-      }
-      catch (TimeoutException)
-      {
-      }
-    }
-
-    // SessionCancellation stays undisposed: late event handlers may still link to its token.
-    Outbox.Abandon();
   }
 }
 
-// Ends the connection with a close code other than protocol_error.
+// Ends the connection with a close code other than protocol_error. The session ends with it.
 sealed class CloseException(WebSocketCloseStatus status, string message) : Exception(message)
 {
   public WebSocketCloseStatus Status { get; } = status;

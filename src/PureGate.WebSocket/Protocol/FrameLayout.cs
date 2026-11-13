@@ -60,6 +60,9 @@ static class FrameLayout
       or FrameKind.Authenticate
       or FrameKind.Authenticated;
 
+  // Frames counted for acknowledgement and resume (docs/PROTOCOL.md, Acknowledgement and resume).
+  public static bool IsSequenced(FrameKind kind) => kind is >= FrameKind.Request and <= FrameKind.Cancel;
+
   // Name codes 0 (literal) and 2n + 1 (definition) are followed by the name's text; 2n refers to it.
   public static bool NameHasText(uint code) => code == 0 || (code & 1) == 1;
 }

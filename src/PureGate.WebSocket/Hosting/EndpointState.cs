@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
 using System.Net.WebSockets;
@@ -157,8 +158,17 @@ sealed class EndpointState
       DangerousEnableCompression = Options.EnableCompression,
     });
 
-    var connection = new WebSocketConnection(this, context, socket);
-    await connection.RunAsync();
+    await WebSocketConnection.AcceptAsync(this, new Transport.Link(socket, context));
+  }
+
+  // Every session of this endpoint by its id, connected or waiting for a resume.
+  public ConcurrentDictionary<string, WebSocketConnection> Sessions { get; } = new(StringComparer.Ordinal);
+
+  // The host is stopping: every session gets GoAway and drains.
+  public void GoAway()
+  {
+    foreach (var session in Sessions.Values)
+      session.GoAway();
   }
 
   // The contract over HTTP, for MapContract. The hash is the ETag, so an unchanged contract costs a 304.

@@ -258,7 +258,9 @@ public sealed class CallTests
   public async Task CancelsRunningHandlersWhenTheSessionEnds()
   {
     var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-    await using var host = await TestHost.StartAsync(map: ws => ws.MapRequest("test.hang", async (call, cancellationToken) =>
+    await using var host = await TestHost.StartAsync(
+      configure: static options => options.ResumeWindow = TimeSpan.Zero,
+      map: ws => ws.MapRequest("test.hang", async (call, cancellationToken) =>
     {
       try
       {

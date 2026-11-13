@@ -31,7 +31,9 @@ public sealed partial class WebSocketConnection
   {
     ArgumentNullException.ThrowIfNull(request);
     var info = Endpoint.GetClientRequest(request);
-    if (ClientCallSlots is null || IsEnded)
+
+    // A draining connection starts nothing new.
+    if (ClientCallSlots is null || IsEnded || Draining)
       throw ConnectionClosed();
 
     using (var waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, Closed))
@@ -126,8 +128,7 @@ public sealed partial class WebSocketConnection
       }
 
       var result = Outbox.Write(in frame, info.Descriptor.Name, info.Descriptor.NameUtf8);
-      if (result == WriteResult.Overloaded)
-        SlowConsumer();
+      CheckBacklog(result);
 
       return result;
     }
@@ -148,6 +149,7 @@ public sealed partial class WebSocketConnection
 
     ClientCallSlots.Release();
     pending.Complete(in frame);
+    CheckDrained();
   }
 
   void RemoveInvoke(uint id)
@@ -156,6 +158,7 @@ public sealed partial class WebSocketConnection
       Invokes.Remove(id);
 
     ClientCallSlots.Release();
+    CheckDrained();
   }
 
   // Ids run from 1 to 2^32 - 1 and wrap, skipping the ones still in use. Called under InvokesGate.

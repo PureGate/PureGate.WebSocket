@@ -35,8 +35,19 @@ public sealed partial class WebSocketConnection
     return ValueTask.CompletedTask;
   }
 
+  // Sends an event, unless the connection is draining for a shutdown, or the page is too far behind and the policy
+  // drops events.
   internal void WriteEvent(string name, ReadOnlySpan<byte> nameUtf8, bool binary, ReadOnlySpan<byte> payload)
   {
+    if (Draining)
+      return;
+
+    if (Options.SlowConsumer == SlowConsumerPolicy.DropEvents && IsFarBehind)
+    {
+      Log.EventNotSent(Logger, Id, name);
+      return;
+    }
+
     var frame = new Frame
     {
       Kind = FrameKind.Event,
@@ -52,8 +63,8 @@ public sealed partial class WebSocketConnection
       case WriteResult.Overloaded when Options.SlowConsumer == SlowConsumerPolicy.DropEvents:
         Log.EventNotSent(Logger, Id, name);
         break;
-      case WriteResult.Overloaded:
-        SlowConsumer();
+      case var result:
+        CheckBacklog(result);
         break;
     }
   }

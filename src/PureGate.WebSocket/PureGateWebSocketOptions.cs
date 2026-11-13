@@ -41,7 +41,24 @@ public sealed class PureGateWebSocketOptions
   // Bytes that may wait to be sent to one client. Past it, SlowConsumer applies.
   public long SendQueueLimitBytes { get; set; } = 1024 * 1024;
 
+  // How far the page may fall behind, in frames it has not acknowledged, before SlowConsumer applies.
+  public int MaxUnacknowledgedFrames { get; set; } = 4096;
+
   public SlowConsumerPolicy SlowConsumer { get; set; } = SlowConsumerPolicy.Close;
+
+  // How long a dropped session stays resumable: its handlers keep running, and what it sends waits for the browser.
+  // TimeSpan.Zero turns resume off.
+  public TimeSpan ResumeWindow { get; set; } = TimeSpan.FromSeconds(30);
+
+  // Bytes of unacknowledged frames kept for a resume. Past it, the session can no longer resume.
+  public long ReplayBufferBytes { get; set; } = 1024 * 1024;
+
+  // This server instance's routing id, sent to browsers so a load balancer can route their resume back here. Not a
+  // secret. None by default.
+  public string ResumeRoute { get; set; }
+
+  // How long a stopping server lets exchanges in progress finish after GoAway.
+  public TimeSpan DrainTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
   // Origins allowed to connect, such as "https://app.example.com", or "*" for any. When empty, only the endpoint's
   // own origin is allowed, and clients that send no Origin header (not browsers). This stops other sites from
@@ -83,7 +100,12 @@ public sealed class PureGateWebSocketOptions
     KeepAliveInterval = KeepAliveInterval,
     KeepAliveTimeout = KeepAliveTimeout,
     SendQueueLimitBytes = SendQueueLimitBytes,
+    MaxUnacknowledgedFrames = MaxUnacknowledgedFrames,
     SlowConsumer = SlowConsumer,
+    ResumeWindow = ResumeWindow,
+    ReplayBufferBytes = ReplayBufferBytes,
+    ResumeRoute = ResumeRoute,
+    DrainTimeout = DrainTimeout,
     AllowedOrigins = [.. AllowedOrigins],
     UserId = UserId,
     InvokeTimeout = InvokeTimeout,
@@ -108,6 +130,11 @@ public sealed class PureGateWebSocketOptions
     ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(HandshakeTimeout, TimeSpan.Zero, nameof(HandshakeTimeout));
     ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(Heartbeat, TimeSpan.Zero, nameof(Heartbeat));
     ArgumentOutOfRangeException.ThrowIfLessThan(SendQueueLimitBytes, MaxMessageBytes, nameof(SendQueueLimitBytes));
+    ArgumentOutOfRangeException.ThrowIfLessThan(MaxUnacknowledgedFrames, 64, nameof(MaxUnacknowledgedFrames));
+    ArgumentOutOfRangeException.ThrowIfLessThan(ResumeWindow, TimeSpan.Zero, nameof(ResumeWindow));
+    ArgumentOutOfRangeException.ThrowIfLessThan(DrainTimeout, TimeSpan.Zero, nameof(DrainTimeout));
+    if (ResumeWindow > TimeSpan.Zero)
+      ArgumentOutOfRangeException.ThrowIfLessThan(ReplayBufferBytes, MaxMessageBytes, nameof(ReplayBufferBytes));
     if (InvokeTimeout != Timeout.InfiniteTimeSpan)
       ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(InvokeTimeout, TimeSpan.Zero, nameof(InvokeTimeout));
   }
@@ -116,7 +143,7 @@ public sealed class PureGateWebSocketOptions
 // What happens to a client that does not read its messages as fast as the server sends them.
 public enum SlowConsumerPolicy
 {
-  // Close the connection with 4003 (slow_consumer).
+  // Close the connection with 4003 (slow_consumer). The browser reconnects, and resumes when it can.
   Close,
 
   // Drop events for it until it catches up. Responses still close the connection, since they cannot be dropped.

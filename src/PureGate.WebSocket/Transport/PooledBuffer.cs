@@ -19,6 +19,9 @@ sealed class PooledBuffer : IBufferWriter<byte>
 
   public void Advance(int count) => Written += count;
 
+  // Empties the buffer and keeps its array, for reuse.
+  public void Clear() => Written = 0;
+
   public Memory<byte> GetMemory(int sizeHint = 0)
   {
     Reserve(sizeHint);

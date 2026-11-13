@@ -86,6 +86,7 @@ public sealed partial class WebSocketConnection
       SendOutcome(call.Id, outcome);
 
     await call.DisposeAsync();
+    CheckDrained();
   }
 
   internal async ValueTask FailCallAsync(WebSocketCall call, Exception exception)
@@ -98,6 +99,7 @@ public sealed partial class WebSocketConnection
       SendFailure(call, exception, FrameKind.Response);
 
     await call.DisposeAsync();
+    CheckDrained();
   }
 
   internal void RejectCall(uint id, ErrorCode code, string message) => SendError(id, code, default, message, default);

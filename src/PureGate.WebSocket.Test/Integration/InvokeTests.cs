@@ -123,7 +123,9 @@ public sealed class InvokeTests
   public async Task FailsCallsWhenTheSessionEnds()
   {
     var failure = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-    await using var host = await TestHost.StartAsync(map: ws => ws.MapRequest("test.ask", async (call, cancellationToken) =>
+    await using var host = await TestHost.StartAsync(
+      configure: static options => options.ResumeWindow = TimeSpan.Zero,
+      map: ws => ws.MapRequest("test.ask", async (call, cancellationToken) =>
     {
       try
       {

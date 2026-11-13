@@ -18,6 +18,7 @@ sealed class Outgoing
   public string Trace;
   public uint Credit;
   public uint Amount;
+  public uint Count;
   public ErrorCode ErrorCode;
   public string ErrorCustom;
   public string ErrorMessage;
@@ -56,6 +57,8 @@ sealed class Outgoing
 
   public static Outgoing Grant(uint id, uint amount) => new() { Kind = FrameKind.Credit, Id = id, Amount = amount };
 
+  public static Outgoing Ack(uint count) => new() { Kind = FrameKind.Ack, Count = count };
+
   public void WriteTo(IBufferWriter<byte> output)
   {
     var frame = new Frame
@@ -69,6 +72,7 @@ sealed class Outgoing
       Trace = Trace is null ? default : Encoding.ASCII.GetBytes(Trace),
       Credit = Credit,
       Amount = Amount,
+      Count = Count,
       ErrorCode = ErrorCode,
       ErrorCustom = ErrorCustom is null ? default : Encoding.ASCII.GetBytes(ErrorCustom),
       ErrorMessage = Encoding.UTF8.GetBytes(ErrorMessage ?? ""),
@@ -170,6 +174,12 @@ sealed class TestClient : IAsyncDisposable
 
     return new TestClient(socket);
   }
+
+  // A Hello that resumes session, which this client has processed received frames of.
+  public static string ResumeHello(string session, long received) =>
+    "{\"calls\":16,\"maxMessage\":1048576,\"resume\":{\"session\":\"" + session + "\",\"received\":" + received + "}}";
+
+  public string Session => Welcome.GetProperty("session").GetString();
 
   public async Task<Received> HelloAsync(string hello = DefaultHello)
   {
@@ -279,10 +289,10 @@ sealed class TestClient : IAsyncDisposable
     }
   }
 
-  public async Task CloseAsync()
+  public async Task CloseAsync(WebSocketCloseStatus status = WebSocketCloseStatus.NormalClosure)
   {
     using var timeout = new CancellationTokenSource(DefaultTimeout);
-    await Socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", timeout.Token);
+    await Socket.CloseAsync(status, "", timeout.Token);
   }
 
   async Task<(WebSocketMessageType Type, int Length)> ReceiveMessageAsync(TimeSpan timeout)

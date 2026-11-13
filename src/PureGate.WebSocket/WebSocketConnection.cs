@@ -8,38 +8,43 @@ using Microsoft.Extensions.Logging;
 using PureGate.WebSocket.Hosting;
 using PureGate.WebSocket.Protocol;
 using PureGate.WebSocket.Transport;
-using NetWebSocket = System.Net.WebSockets.WebSocket;
 
 namespace PureGate.WebSocket;
 
-// One browser's session with an endpoint: what handlers and the hub talk to, and everything the session keeps.
-// The other parts of this class: receiving (Receive), calls from the browser (Calls), events in both directions
-// (Events), and calls to the browser (Invoke).
+// One browser's session with an endpoint: what handlers and the hub talk to, and everything the session keeps. A
+// session outlives its WebSocket: when the connection drops, it keeps running and waits for the browser to resume.
+// The other parts of this class: receiving (Receive), resume, acknowledgement and shutdown (Session), calls from the
+// browser (Calls), streams (Streams), events in both directions (Events), and calls to the browser (Invoke).
 public sealed partial class WebSocketConnection
 {
-  readonly NetWebSocket Socket;
   readonly CancellationTokenSource SessionCancellation = new();
   readonly IncomingNameTable<Operation> Names;
   readonly Outbox Outbox;
   int Ended;
 
-  internal WebSocketConnection(EndpointState endpoint, HttpContext httpContext, NetWebSocket socket)
+  internal WebSocketConnection(EndpointState endpoint, Link link)
   {
     Endpoint = endpoint;
-    HttpContext = httpContext;
-    Socket = socket;
+    HttpContext = link.Context;
+    User = link.Context.User;
     Id = NewId(9);
-    User = httpContext.User;
+    SessionId = NewId(16);
     Groups = new WebSocketGroups(this);
     Names = new IncomingNameTable<Operation>(endpoint.ResolveName);
-    Outbox = new Outbox(socket, endpoint.Options.SendQueueLimitBytes);
+    var options = endpoint.Options;
+    Outbox = new Outbox(options.SendQueueLimitBytes, options.ResumeWindow > TimeSpan.Zero ? options.ReplayBufferBytes : 0)
+    {
+      ResumeLost = ResumeLost,
+    };
     Closed = SessionCancellation.Token;
-    Events = endpoint.Options.EventOrdering == EventOrdering.Sequential ? new EventQueue(this) : null;
+    Events = options.EventOrdering == EventOrdering.Sequential ? new EventQueue(this) : null;
   }
 
-  // The connection's id: unique on this server, safe to log, and sent to the browser in Welcome.
+  // The connection's id: unique on this server, safe to log, and sent to the browser in Welcome. It stays the same
+  // when the browser resumes.
   public string Id { get; }
 
+  // The user of the latest upgrade request: a resume must be by the same user.
   public ClaimsPrincipal User { get; private set; }
 
   // The id hub.User(id) finds this connection by, from PureGateWebSocketOptions.UserId. Null without one.
@@ -50,11 +55,13 @@ public sealed partial class WebSocketConnection
 
   public WebSocketGroups Groups { get; }
 
-  // The upgrade request's context.
-  public HttpContext HttpContext { get; }
+  // The latest upgrade request's context.
+  public HttpContext HttpContext { get; private set; }
 
-  // Fires when the session ends.
+  // Fires when the session ends: not when its connection drops, if the browser can still resume.
   public CancellationToken Closed { get; }
+
+  internal string SessionId { get; }
 
   internal EndpointState Endpoint { get; }
 
@@ -64,32 +71,52 @@ public sealed partial class WebSocketConnection
 
   internal bool IsEnded => Volatile.Read(ref Ended) != 0;
 
-  // Closes the connection: what is queued goes out first, then the close frame.
+  // Closes the connection for good: what is queued goes out first, then the close frame, and the session ends.
   public ValueTask CloseAsync(WebSocketCloseStatus status = WebSocketCloseStatus.NormalClosure, string reason = "")
   {
-    Close(status, reason);
+    CloseLink(status, reason, endsSession: true);
     return ValueTask.CompletedTask;
   }
 
-  internal void Close(WebSocketCloseStatus status, string reason)
+  // Closes the current connection. Unless endsSession, the session stays for the browser to resume when it can;
+  // discard drops what was still queued for the connection, which a resume sends again.
+  internal void CloseLink(WebSocketCloseStatus status, string reason, bool endsSession, bool discard = false)
   {
-    Closing = true;
-    Outbox.Close(status, reason);
+    Link link;
+    lock (LinkGate)
+    {
+      link = CurrentLink;
+      if (link is not null)
+        link.EndsSession |= endsSession;
+    }
+
+    if (link is not null)
+      Outbox.Close(link, status, reason, discard);
+    else if (endsSession)
+      _ = EndAsync();
   }
 
   internal WriteResult Write(scoped in Frame frame)
   {
     var result = Outbox.Write(in frame);
-    if (result == WriteResult.Overloaded)
-      SlowConsumer();
-
+    CheckBacklog(result);
     return result;
   }
+
+  // After a write that cannot be dropped: a full send queue, or a page too far behind under SlowConsumerPolicy.Close,
+  // closes the connection.
+  void CheckBacklog(WriteResult result)
+  {
+    if (result == WriteResult.Overloaded || (Options.SlowConsumer == SlowConsumerPolicy.Close && IsFarBehind))
+      SlowConsumer();
+  }
+
+  bool IsFarBehind => Outbox.Unacknowledged > Options.MaxUnacknowledgedFrames && Outbox.IsAttached;
 
   void SlowConsumer()
   {
     Diagnostics.Log.SlowConsumer(Logger, Id);
-    Close((WebSocketCloseStatus)CloseCodes.SlowConsumer, "The client fell too far behind.");
+    CloseLink((WebSocketCloseStatus)CloseCodes.SlowConsumer, "The client fell too far behind.", endsSession: false, discard: true);
   }
 
   static string NewId(int bytes) => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(bytes));
@@ -104,4 +131,5 @@ static class CloseCodes
   public const int SlowConsumer = 4003;
   public const int ContractRejected = 4004;
   public const int SessionReplaced = 4005;
+  public const int Reconnecting = 4006;
 }

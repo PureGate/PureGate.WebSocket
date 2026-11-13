@@ -263,6 +263,7 @@ Either side ends the connection with a WebSocket close frame. Outstanding exchan
 | 4003 | `slow_consumer`: the client fell too far behind. | yes, resuming if it can |
 | 4004 | `contract_rejected`: the server refuses stale contracts. | no |
 | 4005 | `session_replaced`: another connection resumed this session. | no |
+| 4006 | `reconnecting`, sent by the client: this connection ends, and the client will resume the session, for example while the page is in the back/forward cache or after its heartbeat failed. Browsers can only send 1000 and 3000–4999 themselves, so this stands in for 1001. | not applicable |
 
 ## Example
 

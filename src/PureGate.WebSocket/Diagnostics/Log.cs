@@ -50,4 +50,10 @@ static partial class Log
 
   [LoggerMessage(15, LogLevel.Error, "The contract could not be generated, so browsers' contract hashes are not checked.")]
   public static partial void ContractFailed(ILogger logger, Exception exception);
+
+  [LoggerMessage(16, LogLevel.Debug, "Connection {ConnectionId} resumed its session.")]
+  public static partial void SessionResumed(ILogger logger, string connectionId);
+
+  [LoggerMessage(17, LogLevel.Debug, "The session of connection {ConnectionId} expired without a resume.")]
+  public static partial void SessionExpired(ILogger logger, string connectionId);
 }

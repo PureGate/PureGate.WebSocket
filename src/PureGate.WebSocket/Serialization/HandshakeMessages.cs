@@ -17,7 +17,7 @@ sealed class HelloMessage
 sealed class ResumeRequest
 {
   public string Session { get; set; }
-  public uint Received { get; set; }
+  public long Received { get; set; }
 }
 
 sealed class WelcomeMessage
@@ -25,7 +25,7 @@ sealed class WelcomeMessage
   public string Connection { get; set; }
   public string Session { get; set; }
   public bool Resumed { get; set; }
-  public uint Received { get; set; }
+  public long Received { get; set; }
   public int Calls { get; set; }
   public int Streams { get; set; }
   public int Events { get; set; }

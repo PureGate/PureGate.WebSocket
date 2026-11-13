@@ -63,6 +63,9 @@ sealed class TestHost : IAsyncDisposable
     return client;
   }
 
+  // Stops the host as a deploy would: GoAway on every connection, then the drain.
+  public Task StopAsync() => App.StopAsync();
+
   public async ValueTask DisposeAsync()
   {
     await App.StopAsync();

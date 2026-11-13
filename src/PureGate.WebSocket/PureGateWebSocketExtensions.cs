@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using PureGate.WebSocket.Hosting;
@@ -46,6 +47,9 @@ public static class PureGateWebSocketExtensions
       hub,
       services.GetRequiredService<ILoggerFactory>(),
       services.GetRequiredService<IServiceScopeFactory>());
+
+    // A stopping host sends GoAway on every connection, so browsers move to another instance before this one goes.
+    services.GetService<IHostApplicationLifetime>()?.ApplicationStopping.Register(endpoint.GoAway);
 
     var inner = endpoints.Map(pattern, endpoint.HandleAsync);
     return new WebSocketEndpointBuilder(endpoint, inner, endpoints);

@@ -113,6 +113,7 @@ public sealed partial class WebSocketConnection
     }
 
     await stream.Call.DisposeAsync();
+    CheckDrained();
   }
 
   void OnCredit(scoped in Frame frame)
@@ -196,6 +197,7 @@ public sealed partial class WebSocketConnection
     }
 
     upload.Finish(frame.Has(FrameFlags.HasError) ? CallException.FromFrame(in frame) : null);
+    CheckDrained();
   }
 
   // The browser's Cancel for an upload: no more items come, and the handler is cancelled, even after the browser's
@@ -204,20 +206,23 @@ public sealed partial class WebSocketConnection
   void CancelUpload(uint id)
   {
     UploadState upload;
+    var ended = false;
     lock (CallsGate)
     {
       if (!Uploads.TryGetValue(id, out upload))
         return;
 
-      if (upload.Answered)
-      {
-        // Answered and not yet ended by the browser, or it would be gone: this Cancel is the browser's end.
-        upload.ClientEnded = true;
-        Uploads.Remove(id);
-        return;
-      }
-
+      // Answered and not yet ended by the browser, or it would be gone: this Cancel is the browser's end.
+      ended = upload.Answered;
       upload.ClientEnded = true;
+      if (ended)
+        Uploads.Remove(id);
+    }
+
+    if (ended)
+    {
+      CheckDrained();
+      return;
     }
 
     upload.Call.CancelByClient();
@@ -234,6 +239,7 @@ public sealed partial class WebSocketConnection
       SendOutcome(upload.Id, outcome);
 
     await upload.Call.DisposeAsync();
+    CheckDrained();
   }
 
   internal async ValueTask FailUploadAsync(UploadState upload, Exception exception)
@@ -246,6 +252,7 @@ public sealed partial class WebSocketConnection
       SendFailure(upload.Call, exception, FrameKind.Response);
 
     await upload.Call.DisposeAsync();
+    CheckDrained();
   }
 
   // The server's answer is about to go out. The upload leaves the window now if the browser has ended it too.
