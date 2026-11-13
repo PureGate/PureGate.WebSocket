@@ -26,7 +26,10 @@ sealed class EndpointState
   FrozenDictionary<string, Operation>.AlternateLookup<ReadOnlySpan<char>> Lookup;
   volatile bool Started;
 
+  readonly Lazy<WebSocketContract> LazyContract;
+
   public EndpointState(
+      string route,
       PureGateWebSocketOptions options,
       WebSocketHub hub,
       ILoggerFactory loggers,
@@ -36,13 +39,20 @@ sealed class EndpointState
     UseResolver(options.SerializerOptions);
     options.SerializerOptions.MakeReadOnly();
 
+    Route = route;
     Options = options;
     Hub = hub;
     Logger = loggers.CreateLogger("PureGate.WebSocket");
     Scopes = scopes;
     ResolveName = Resolve;
+    LazyContract = new Lazy<WebSocketContract>(BuildContract);
     hub.AddEndpoint(this);
   }
+
+  public string Route { get; }
+
+  // Built the first time it is needed. Building it freezes the mapping, like the first connection does.
+  public WebSocketContract Contract => LazyContract.Value;
 
   public PureGateWebSocketOptions Options { get; }
 
@@ -149,6 +159,42 @@ sealed class EndpointState
 
     var connection = new WebSocketConnection(this, context, socket);
     await connection.RunAsync();
+  }
+
+  // The contract over HTTP, for MapContract. The hash is the ETag, so an unchanged contract costs a 304.
+  public async Task WriteContractAsync(HttpContext context)
+  {
+    var contract = Contract;
+    var etag = $"\"{contract.Hash}\"";
+    context.Response.Headers.ETag = etag;
+    if (context.Request.Headers.IfNoneMatch.Contains(etag))
+    {
+      context.Response.StatusCode = StatusCodes.Status304NotModified;
+      return;
+    }
+
+    context.Response.ContentType = "text/plain; charset=utf-8";
+    await context.Response.WriteAsync(contract.TypeScript);
+  }
+
+  WebSocketContract BuildContract()
+  {
+    Start();
+    var members = new List<Contracts.ContractMember>();
+    foreach (var operation in Operations.Values)
+    {
+      if (operation.Kind == OperationKind.Request)
+        members.Add(new(Section: "api", operation.Name, operation.RequestType, operation.ResponseType));
+      else if (operation.Kind == OperationKind.ClientEvent)
+        members.Add(new(Section: "clientEvents", operation.Name, operation.RequestType, operation.ResponseType));
+    }
+
+    foreach (var info in EventInfos.Values.Cast<IOutgoingMember>())
+      members.Add(new(Section: "events", info.Name, info.RequestType, info.ResponseType));
+    foreach (var info in ClientRequestInfos.Values.Cast<IOutgoingMember>())
+      members.Add(new(Section: "clientApi", info.Name, info.RequestType, info.ResponseType));
+
+    return Contracts.ContractGenerator.Generate(Route, members, Options.SerializerOptions, Options.Contract);
   }
 
   bool IsOriginAllowed(HttpContext context)

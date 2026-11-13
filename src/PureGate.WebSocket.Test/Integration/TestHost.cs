@@ -12,11 +12,14 @@ sealed class TestHost : IAsyncDisposable
 {
   readonly WebApplication App;
 
-  TestHost(WebApplication app, Uri uri)
+  TestHost(WebApplication app, WebSocketEndpointBuilder endpoint, Uri uri)
   {
     App = app;
+    Endpoint = endpoint;
     Uri = uri;
   }
+
+  public WebSocketEndpointBuilder Endpoint { get; }
 
   public Uri Uri { get; }
 
@@ -46,7 +49,7 @@ sealed class TestHost : IAsyncDisposable
     await app.StartAsync();
 
     var address = app.Urls.First();
-    return new TestHost(app, new Uri($"ws{address["http".Length..]}/ws"));
+    return new TestHost(app, ws, new Uri($"ws{address["http".Length..]}/ws"));
   }
 
   public Task<TestClient> ConnectAsync(string origin = null, string subprotocol = TestClient.Subprotocol) =>

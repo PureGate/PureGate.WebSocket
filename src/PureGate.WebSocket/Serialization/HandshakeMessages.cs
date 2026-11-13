@@ -43,4 +43,5 @@ sealed class WelcomeMessage
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(HelloMessage))]
 [JsonSerializable(typeof(WelcomeMessage))]
+[JsonSerializable(typeof(string))]
 partial class HandshakeJson : JsonSerializerContext;

@@ -1,4 +1,6 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Routing;
 using PureGate.WebSocket.Hosting;
 using PureGate.WebSocket.Serialization;
 
@@ -110,11 +112,24 @@ public sealed class WebSocketGroup : WebSocketBuilder
 public sealed class WebSocketEndpointBuilder : WebSocketBuilder, IEndpointConventionBuilder
 {
   readonly IEndpointConventionBuilder Inner;
+  readonly IEndpointRouteBuilder Routes;
 
-  internal WebSocketEndpointBuilder(EndpointState endpoint, IEndpointConventionBuilder inner)
+  internal WebSocketEndpointBuilder(EndpointState endpoint, IEndpointConventionBuilder inner, IEndpointRouteBuilder routes)
     : base(endpoint, "")
   {
     Inner = inner;
+    Routes = routes;
+  }
+
+  // The endpoint's API as TypeScript, as MapContract serves it. Reading it freezes the mapping.
+  public WebSocketContract Contract => Endpoint.Contract;
+
+  // Serves contract.ts over HTTP GET, for developers to pull into the browser app. It shows the whole API, so map it
+  // in development only, or put it behind authorization with the conventions this returns.
+  public IEndpointConventionBuilder MapContract([StringSyntax("Route")] string pattern)
+  {
+    ArgumentNullException.ThrowIfNull(pattern);
+    return Routes.MapGet(pattern, Endpoint.WriteContractAsync);
   }
 
   // An event this endpoint's connections can be sent. Its name is the descriptor's, whatever the prefix.

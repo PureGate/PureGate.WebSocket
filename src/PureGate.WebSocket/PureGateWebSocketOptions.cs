@@ -57,6 +57,12 @@ public sealed class PureGateWebSocketOptions
   // the message's size can give the secret away.
   public bool EnableCompression { get; set; }
 
+  // How the contract describes .NET types (see WebSocketEndpointBuilder.MapContract).
+  public ContractOptions Contract { get; set; } = new();
+
+  // What happens when a browser's contract.ts is not the server's.
+  public ContractMismatchPolicy ContractMismatch { get; set; } = ContractMismatchPolicy.Warn;
+
   internal PureGateWebSocketOptions Clone() => new()
   {
     SerializerOptions = new JsonSerializerOptions(SerializerOptions),
@@ -75,6 +81,8 @@ public sealed class PureGateWebSocketOptions
     IncludeExceptionDetails = IncludeExceptionDetails,
     EventOrdering = EventOrdering,
     EnableCompression = EnableCompression,
+    Contract = Contract.Clone(),
+    ContractMismatch = ContractMismatch,
   };
 
   internal void Validate()
@@ -82,6 +90,7 @@ public sealed class PureGateWebSocketOptions
     ArgumentNullException.ThrowIfNull(SerializerOptions, nameof(SerializerOptions));
     ArgumentNullException.ThrowIfNull(AllowedOrigins, nameof(AllowedOrigins));
     ArgumentNullException.ThrowIfNull(UserId, nameof(UserId));
+    ArgumentNullException.ThrowIfNull(Contract, nameof(Contract));
     ArgumentOutOfRangeException.ThrowIfLessThan(MaxMessageBytes, 16 * 1024, nameof(MaxMessageBytes));
     ArgumentOutOfRangeException.ThrowIfLessThan(MaxConcurrentCalls, 4, nameof(MaxConcurrentCalls));
     ArgumentOutOfRangeException.ThrowIfLessThan(EventWindow, 16, nameof(EventWindow));

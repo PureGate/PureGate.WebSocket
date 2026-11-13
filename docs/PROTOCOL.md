@@ -167,7 +167,7 @@ A Hello that fails closes the connection with the matching close code (see [Clos
 | `maxMessage` | number | The largest message the server accepts, in bytes. At least 16,384. |
 | `heartbeat` | number | Milliseconds (see [Liveness](#liveness)). |
 | `resumeWindow` | number | Milliseconds a dropped session stays resumable. 0 means resume is off. |
-| `contract` | `"current"` or `"stale"`, optional | Present when Hello carried a contract hash: whether it matches the server's. |
+| `contract` | `"current"` or `"stale"`, optional | Present when Hello carried a contract hash and the server checks them: whether it matches the server's. |
 | `expires` | number, optional | Milliseconds until the connection's authentication expires (see [Re-authentication](#re-authentication)). Absent when it doesn't expire. |
 | `route` | string, optional | This server instance's routing id, for resuming behind a load balancer (see [Acknowledgement and resume](#acknowledgement-and-resume)). Not a secret. |
 

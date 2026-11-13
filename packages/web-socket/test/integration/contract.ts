@@ -1,56 +1,11 @@
 import { afterEach, inject } from "vitest";
 import { type Connection, type ConnectOptions, connect } from "../../src/index.ts";
+import type { Contract } from "./contract.generated.ts";
 
-// The TestServer's contract, written by hand (src/PureGate.WebSocket.TestServer/TestApi.cs).
-
-export interface Note {
-  text: string;
-  number: number;
-}
-
-export interface Click {
-  x: number;
-  y: number;
-}
-
-export interface Question {
-  text: string;
-}
-
-export interface TestContract {
-  api: {
-    echo: {
-      note(note: Note): Note;
-      text(text: string): string;
-      bytes(bytes: Uint8Array): Uint8Array;
-      numbers(numbers: number[]): number[];
-      trace(): string;
-      repeat(length: number): string;
-    };
-    math: { add(request: { a: number; b: number }): number };
-    time: { now(): number };
-    misc: { noop(): void; consume(text: string): void };
-    calls: {
-      delay(milliseconds: number): string;
-      cancelled(): number;
-      block(): number;
-      release(): void;
-      peak(): number;
-    };
-    fail: { notFound(id: number): string; crash(): string };
-    events: {
-      echo(text: string): void;
-      broadcast(note: Note): void;
-      join(group: string): void;
-      toGroup(request: { group: string; note: Note }): void;
-    };
-    telemetry: { waitFor(count: number): Click[] };
-    browser: { confirm(text: string): string; slow(milliseconds: number): string };
-  };
-  events: { events: { received(text: string): void; broadcast(note: Note): void } };
-  clientApi: { ui: { confirm(question: Question): boolean; slow(milliseconds: number): number } };
-  clientEvents: { telemetry: { click(click: Click): void } };
-}
+// The tests are typed by the TestServer's own contract, which the .NET tests regenerate and compare
+// (ContractTests.DescribesTheTestServer).
+export type { Click, Note, Question } from "./contract.generated.ts";
+export type TestContract = Contract;
 
 const opened: Connection<TestContract>[] = [];
 

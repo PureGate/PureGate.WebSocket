@@ -21,6 +21,11 @@ abstract class Operation(string name, OperationKind kind)
 
   public OperationKind Kind { get; } = kind;
 
+  // What the browser sends and gets back, for the contract. NoPayload means nothing.
+  public virtual Type RequestType => typeof(NoPayload);
+
+  public virtual Type ResponseType => typeof(NoPayload);
+
   public abstract void Start(WebSocketConnection connection, scoped in Frame frame);
 
   sealed class UnknownOperation() : Operation("", OperationKind.Unknown)
@@ -41,6 +46,10 @@ sealed class RequestOperation<TRequest, TResponse>(
   public PayloadCodec<TRequest> Request { get; } = request;
 
   public PayloadCodec<TResponse> Response { get; } = response;
+
+  public override Type RequestType => typeof(TRequest);
+
+  public override Type ResponseType => typeof(TResponse);
 
   public override void Start(WebSocketConnection connection, scoped in Frame frame)
   {
@@ -95,6 +104,8 @@ sealed class ClientEventOperation<T>(
 {
   public PayloadCodec<T> Codec { get; } = codec;
 
+  public override Type RequestType => typeof(T);
+
   Func<T, WebSocketCall, CancellationToken, ValueTask> Handler { get; } = handler;
 
   public override void Start(WebSocketConnection connection, scoped in Frame frame)
@@ -144,23 +155,45 @@ abstract class EventWork
   public abstract Task RunAsync(WebSocketConnection connection);
 }
 
+// What the contract needs to know of something the server sends: its name and payload types.
+interface IOutgoingMember
+{
+  string Name { get; }
+
+  Type RequestType { get; }
+
+  Type ResponseType { get; }
+}
+
 // The browser-facing side of a ServerEvent: its name and how its payload is written.
-sealed class ServerEventInfo<T>(ServerEvent<T> descriptor, PayloadCodec<T> codec)
+sealed class ServerEventInfo<T>(ServerEvent<T> descriptor, PayloadCodec<T> codec) : IOutgoingMember
 {
   public ServerEvent<T> Descriptor { get; } = descriptor;
 
   public PayloadCodec<T> Codec { get; } = codec;
+
+  public string Name => Descriptor.Name;
+
+  public Type RequestType => typeof(T);
+
+  public Type ResponseType => typeof(NoPayload);
 }
 
 // The browser-facing side of a ClientRequest: its name and how its payloads are read and written.
 sealed class ClientRequestInfo<TRequest, TResponse>(
     ClientRequest<TRequest, TResponse> descriptor,
     PayloadCodec<TRequest> request,
-    PayloadCodec<TResponse> response)
+    PayloadCodec<TResponse> response) : IOutgoingMember
 {
   public ClientRequest<TRequest, TResponse> Descriptor { get; } = descriptor;
 
   public PayloadCodec<TRequest> Request { get; } = request;
 
   public PayloadCodec<TResponse> Response { get; } = response;
+
+  public string Name => Descriptor.Name;
+
+  public Type RequestType => typeof(TRequest);
+
+  public Type ResponseType => typeof(TResponse);
 }

@@ -245,7 +245,7 @@ export interface Contract {
 export const contractHash = "9f3a1c0b7d2e4a65";
 ```
 
-**Hash.** The first 16 hex digits of a SHA-256 over a canonical JSON form of the names and their schemas, with sorted keys. The hash describes the API, not the TypeScript text, so an improved emitter in a new library version doesn't mark every client stale.
+**Hash.** The first 16 hex digits of a SHA-256 over a canonical JSON form of the names and their schemas, with sorted keys. Named types appear by their TypeScript names, and only the keywords that shape the TypeScript count: types, properties, items, enums, unions and formats. The hash describes the API, not the TypeScript text, so an improved emitter in a new library version doesn't mark every client stale. Keywords such as `pattern` and `required`, which vary between .NET versions, stay out, so upgrading .NET doesn't either.
 
 **Endpoint.** `MapContract` serves the file as `text/plain; charset=utf-8`, with the hash as its ETag (so a conditional request gets 304). It exposes the API's whole surface, so map it in development only, or put it behind authorization.
 

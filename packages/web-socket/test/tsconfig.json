@@ -1,6 +1,6 @@
 {
-  // Type-checks the tests and the Vitest config. They also see Node's types and the repository's test vectors;
-  // the library itself sees neither.
+  // Type-checks the tests, the generated contracts under test/ (generated TypeScript must compile), and the Vitest
+  // config. They also see Node's types and the repository's test vectors; the library itself sees neither.
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "rootDir": "../../..",

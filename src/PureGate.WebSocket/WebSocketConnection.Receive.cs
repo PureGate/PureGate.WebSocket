@@ -74,6 +74,7 @@ public sealed partial class WebSocketConnection
     }
 
     var hello = ReadFirstMessage(ReceiveBuffer.AsSpan(0, length), out var pipelined);
+    ContractStatus = CheckContract(hello.Contract);
     UserId = Options.UserId(User);
     Outbox.MaxMessage = hello.MaxMessage;
     ClientCallSlots = new SemaphoreSlim(hello.Calls, hello.Calls);
@@ -132,6 +133,36 @@ public sealed partial class WebSocketConnection
     return hello;
   }
 
+  // Welcome's contract field: whether the browser's contract.ts is the server's, or null when it sent no hash or
+  // the server does not check. A stale one is logged, or refused under ContractMismatchPolicy.Reject.
+  string CheckContract(string hash)
+  {
+    if (hash is null || Options.ContractMismatch == ContractMismatchPolicy.Ignore)
+      return null;
+
+    string current;
+    try
+    {
+      current = Endpoint.Contract.Hash;
+    }
+    catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException or ArgumentException)
+    {
+      Log.ContractFailed(Logger, exception);
+      return null;
+    }
+
+    if (string.Equals(hash, current, StringComparison.Ordinal))
+      return "current";
+
+    Log.ContractStale(Logger, Id, hash, current);
+    if (Options.ContractMismatch == ContractMismatchPolicy.Reject)
+      throw new CloseException((WebSocketCloseStatus)CloseCodes.ContractRejected, "The browser's contract.ts is stale.");
+
+    return "stale";
+  }
+
+  string ContractStatus;
+
   void SendWelcome()
   {
     var welcome = new WelcomeMessage
@@ -143,6 +174,7 @@ public sealed partial class WebSocketConnection
       Events = Options.EventWindow,
       MaxMessage = Options.MaxMessageBytes,
       Heartbeat = (long)Options.Heartbeat.TotalMilliseconds,
+      Contract = ContractStatus,
     };
 
     var buffer = new PooledBuffer(256);

@@ -41,12 +41,13 @@ public static class PureGateWebSocketExtensions
     var options = services.GetRequiredService<IOptions<PureGateWebSocketOptions>>().Value.Clone();
     configure?.Invoke(options);
     var endpoint = new EndpointState(
+      pattern,
       options,
       hub,
       services.GetRequiredService<ILoggerFactory>(),
       services.GetRequiredService<IServiceScopeFactory>());
 
     var inner = endpoints.Map(pattern, endpoint.HandleAsync);
-    return new WebSocketEndpointBuilder(endpoint, inner);
+    return new WebSocketEndpointBuilder(endpoint, inner, endpoints);
   }
 }

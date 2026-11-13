@@ -5,6 +5,7 @@ node_modules/
 dist/
 coverage/
 artifacts/
+.vitest/
 .yarn/*
 !.yarn/patches
 !.yarn/plugins

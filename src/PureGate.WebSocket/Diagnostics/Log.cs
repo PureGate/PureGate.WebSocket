@@ -44,4 +44,10 @@ static partial class Log
 
   [LoggerMessage(13, LogLevel.Error, "The handler of the event {Event} failed for connection {ConnectionId}.")]
   public static partial void EventHandlerFailed(ILogger logger, string connectionId, string @event, Exception exception);
+
+  [LoggerMessage(14, LogLevel.Warning, "Connection {ConnectionId} has a stale contract.ts ({Hash}; the server's is {Current}). Pull it again.")]
+  public static partial void ContractStale(ILogger logger, string connectionId, string hash, string current);
+
+  [LoggerMessage(15, LogLevel.Error, "The contract could not be generated, so browsers' contract hashes are not checked.")]
+  public static partial void ContractFailed(ILogger logger, Exception exception);
 }

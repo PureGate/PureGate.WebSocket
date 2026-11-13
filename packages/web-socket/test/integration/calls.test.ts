@@ -63,6 +63,8 @@ describe("calls", () => {
 
   it("times out calls, and the server stops their handlers", async () => {
     const conn = open();
+    // Opened first: a call whose deadline passes while it waits for the connection is never sent at all.
+    await conn.opened;
 
     await expect(conn.api.calls.delay(10_000, { timeout: 50 })).rejects.toMatchObject({ code: "timeout" });
     await until(async () => (await conn.api.calls.cancelled()) === 1);

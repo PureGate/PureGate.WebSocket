@@ -87,8 +87,12 @@ public sealed partial class WebSocketConnection
     {
       return await pending.Task.WaitAsync(answer.Token);
     }
-    catch (OperationCanceledException) when (!pending.Task.IsCompleted)
+    catch (OperationCanceledException) when (answer.IsCancellationRequested)
     {
+      // The answer can arrive just as the wait ends; then it is the outcome.
+      if (pending.Task.IsCompleted)
+        return await pending.Task;
+
       var cancel = new Frame { Kind = FrameKind.Cancel, Id = id };
       Write(in cancel);
       if (cancellationToken.IsCancellationRequested)
