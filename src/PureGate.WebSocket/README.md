@@ -147,6 +147,7 @@ builder.Services.AddSingleton<IWebSocketBackplane>(new RedisBackplane(Connection
 - **Order.** The messages one server publishes to a topic must arrive in the order it published them, as one Redis connection and one `ChannelMessageQueue` keep them.
 - **Delivery.** `SendAsync` returns once the event is queued here and published. A failed publish throws, after this server's connections got the event. Between servers, delivery is at most once: what the backend loses is lost.
 - **Failures.** Reconnecting is the backplane's work: StackExchange.Redis reconnects and subscribes again on its own. A subscription that throws is retried. A `ReceiveAsync` that ends before the app stops fails the host, as a failed `BackgroundService` does.
+- **Metrics.** `puregate.websocket.backplane.publish.duration` by target and outcome, `.received` by outcome (`delivered`, `not_mapped`, `unreadable`), `.subscriptions` and `.subscription_failures`, on the `PureGate.WebSocket` meter.
 - **Limits.** `TryGetConnection` and `InvokeAsync` stay on one server, and a resume still has to reach the server that holds the session, through cookie affinity or `ResumeRoute`. Each `ServerEvent` needs a name of its own across the app's endpoints.
 
 ## Options

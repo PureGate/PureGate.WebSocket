@@ -12,10 +12,10 @@ public sealed class TelemetryTests
   const string TraceId = "0af7651916cd43dd8448eb211c80319c";
   const string TraceParent = $"00-{TraceId}-b7ad6b7169203331-01";
 
-  sealed record Measurement(string Instrument, double Value, Dictionary<string, object> Tags);
+  internal sealed record Measurement(string Instrument, double Value, Dictionary<string, object> Tags);
 
   // Measurements of this host's instruments only: other tests' hosts have meters of the same name.
-  static MeterListener Listen(TestHost host, ConcurrentQueue<Measurement> measurements)
+  internal static MeterListener Listen(TestHost host, ConcurrentQueue<Measurement> measurements)
   {
     var meter = host.Services.GetRequiredService<Telemetry>().Meter;
     var listener = new MeterListener

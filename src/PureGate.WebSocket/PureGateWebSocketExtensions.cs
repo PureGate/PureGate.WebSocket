@@ -23,7 +23,10 @@ public static class PureGateWebSocketExtensions
     if (configure is not null)
       services.Configure(configure);
 
-    services.TryAddSingleton(static provider => new WebSocketHub(provider.GetService<IWebSocketBackplane>(), provider.GetService<ILoggerFactory>()));
+    services.TryAddSingleton(static provider => new WebSocketHub(
+      provider.GetService<IWebSocketBackplane>(),
+      provider.GetService<ILoggerFactory>(),
+      provider.GetRequiredService<Diagnostics.Telemetry>()));
     services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, BackplaneService>());
     services.TryAddSingleton<IWebSocketHub>(static provider => provider.GetRequiredService<WebSocketHub>());
     services.TryAddSingleton(static provider => new Diagnostics.Telemetry(provider.GetService<System.Diagnostics.Metrics.IMeterFactory>()));

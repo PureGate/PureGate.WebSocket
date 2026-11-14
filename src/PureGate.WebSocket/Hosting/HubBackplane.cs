@@ -1,4 +1,5 @@
 using System.Buffers.Text;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -32,15 +33,17 @@ sealed class HubBackplane
   readonly Dictionary<string, Subscription> Subscriptions = new(StringComparer.Ordinal);
   readonly byte[] ServerIdUtf8;
   readonly ILogger Logger;
+  readonly Telemetry Telemetry;
 
   // Guarded by Gate.
   bool Started;
   CancellationToken Stopping;
 
-  public HubBackplane(IWebSocketBackplane backend, ILogger logger)
+  public HubBackplane(IWebSocketBackplane backend, ILogger logger, Telemetry telemetry)
   {
     Backend = backend;
     Logger = logger;
+    Telemetry = telemetry;
     ServerId = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(9));
     ServerIdUtf8 = Encoding.ASCII.GetBytes(ServerId);
   }
@@ -104,9 +107,11 @@ sealed class HubBackplane
     }
   }
 
-  // Publishes a message from Write, and gives its buffer back once the backplane is done with it.
-  public ValueTask PublishAsync(string topic, PooledBuffer message, CancellationToken cancellationToken)
+  // Publishes a message from Write for a send to a target of kind, and gives its buffer back once the backplane is
+  // done with it.
+  public ValueTask PublishAsync(string topic, TargetKind kind, PooledBuffer message, CancellationToken cancellationToken)
   {
+    var started = Telemetry.BackplanePublishDuration.Enabled ? Stopwatch.GetTimestamp() : 0;
     ValueTask publish;
     try
     {
@@ -115,19 +120,22 @@ sealed class HubBackplane
     catch (Exception exception)
     {
       message.ReturnScratch();
+      Published(started, kind, succeeded: false);
       return ValueTask.FromException(exception);
     }
 
     if (!publish.IsCompleted)
-      return AwaitPublishAsync(publish, message);
+      return AwaitPublishAsync(publish, message, started, kind);
 
     try
     {
       publish.GetAwaiter().GetResult();
+      Published(started, kind, succeeded: true);
       return default;
     }
     catch (Exception exception)
     {
+      Published(started, kind, succeeded: false);
       return ValueTask.FromException(exception);
     }
     finally
@@ -139,17 +147,50 @@ sealed class HubBackplane
   // Finished on another thread, so the buffer goes back to the pool rather than to this thread's scratch. Pooled, as
   // a backend that sends over the network rarely completes at once.
   [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
-  static async ValueTask AwaitPublishAsync(ValueTask publish, PooledBuffer message)
+  async ValueTask AwaitPublishAsync(ValueTask publish, PooledBuffer message, long started, TargetKind kind)
   {
     try
     {
       await publish;
+      Published(started, kind, succeeded: true);
+    }
+    catch
+    {
+      Published(started, kind, succeeded: false);
+      throw;
     }
     finally
     {
       message.Return();
     }
   }
+
+  // Records a publish that started measuring, when something listened as it began.
+  void Published(long started, TargetKind kind, bool succeeded)
+  {
+    if (started == 0)
+      return;
+
+    Telemetry.BackplanePublishDuration.Record(
+      Stopwatch.GetElapsedTime(started).TotalSeconds,
+      new KeyValuePair<string, object>("puregate.websocket.target", NameOf(kind)),
+      new KeyValuePair<string, object>("puregate.websocket.outcome", succeeded ? "ok" : "failed"));
+  }
+
+  // What became of a message from another server: "delivered", "not_mapped" or "unreadable".
+  public void Received(string outcome)
+  {
+    if (Telemetry.BackplaneReceived.Enabled)
+      Telemetry.BackplaneReceived.Add(1, new KeyValuePair<string, object>("puregate.websocket.outcome", outcome));
+  }
+
+  static string NameOf(TargetKind kind) => kind switch
+  {
+    TargetKind.All => "all",
+    TargetKind.User => "user",
+    TargetKind.Group => "group",
+    _ => "connection",
+  };
 
   // Reads a message up to its payload. False for one this server sent. Throws for a message it cannot read.
   public bool TryRead(ReadOnlySpan<byte> message, out BackplaneMessage read)
@@ -264,10 +305,12 @@ sealed class HubBackplane
 
         lock (Gate)
           subscription.Subscribed = subscribe;
+        Telemetry.BackplaneSubscriptions.Add(subscribe ? 1 : -1);
         retry = FirstRetry;
       }
       catch (Exception exception) when (!stopping.IsCancellationRequested)
       {
+        Telemetry.BackplaneSubscriptionFailures.Add(1, new KeyValuePair<string, object>("puregate.websocket.call", subscribe ? "subscribe" : "unsubscribe"));
         Log.BackplaneSubscriptionFailed(Logger, subscribe ? "subscribe to" : "unsubscribe from", subscription.Topic, retry, exception);
         try
         {

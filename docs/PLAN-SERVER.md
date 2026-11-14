@@ -290,6 +290,7 @@ export const contractHash = "9f3a1c0b7d2e4a65";
   - **Receiving.** An instance skips its own messages and delivers the others to its connections of the target. JSON and byte connections take the payload as it is; it is deserialized only for a connection in another format or on another endpoint. A message that cannot be read is logged and dropped.
   - **Guarantees.** What one instance publishes to a topic arrives in order. Between instances, delivery is at most once: what the backend loses is lost. `TryGetConnection` and calls to the browser stay on one instance, and a resume still has to reach the instance that holds the session.
   - **Lifetime.** A hosted service runs `ReceiveAsync` for the app's lifetime. Reconnecting is the backplane's work; one whose `ReceiveAsync` ends early fails the host, as a failed `BackgroundService` does.
+  - **Metrics.** `puregate.websocket.backplane.publish.duration`, by target (`all`, `user`, `group`, `connection`) and outcome (`ok`, `failed`); `puregate.websocket.backplane.received`, by outcome (`delivered`, `not_mapped`, `unreadable`), not counting the instance's own messages; `puregate.websocket.backplane.subscriptions`, the topics subscribed now; and `puregate.websocket.backplane.subscription_failures`, by call (`subscribe`, `unsubscribe`).
 
 ## Testing
 

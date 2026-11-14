@@ -33,6 +33,15 @@ sealed class Telemetry : IDisposable
       "puregate.websocket.events.sent", "{event}", "Events sent to browsers.");
     SlowConsumers = Meter.CreateCounter<long>(
       "puregate.websocket.slow_consumers", "{connection}", "Connections that fell too far behind.");
+    BackplanePublishDuration = Meter.CreateHistogram<double>(
+      "puregate.websocket.backplane.publish.duration", "s", "How long publishing to the backplane took, by target and outcome.",
+      advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = [0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5] });
+    BackplaneReceived = Meter.CreateCounter<long>(
+      "puregate.websocket.backplane.received", "{message}", "Messages from other servers through the backplane, by outcome.");
+    BackplaneSubscriptions = Meter.CreateUpDownCounter<long>(
+      "puregate.websocket.backplane.subscriptions", "{topic}", "Backplane topics this server is subscribed to.");
+    BackplaneSubscriptionFailures = Meter.CreateCounter<long>(
+      "puregate.websocket.backplane.subscription_failures", "{call}", "Backplane subscribes and unsubscribes that failed, to be tried again.");
   }
 
   public UpDownCounter<long> Connections { get; }
@@ -48,6 +57,14 @@ sealed class Telemetry : IDisposable
   public Counter<long> EventsSent { get; }
 
   public Counter<long> SlowConsumers { get; }
+
+  public Histogram<double> BackplanePublishDuration { get; }
+
+  public Counter<long> BackplaneReceived { get; }
+
+  public UpDownCounter<long> BackplaneSubscriptions { get; }
+
+  public Counter<long> BackplaneSubscriptionFailures { get; }
 
   // A server span for an operation, continuing the browser's trace when it sent a traceparent. Null when nothing
   // listens.

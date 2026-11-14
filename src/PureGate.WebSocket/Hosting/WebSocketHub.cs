@@ -31,11 +31,11 @@ sealed class WebSocketHub : IWebSocketHub
   // writes it, and those from other servers find their event here.
   readonly ConcurrentDictionary<string, IRelayedEvent> FirstMappings = new(StringComparer.Ordinal);
 
-  public WebSocketHub(IWebSocketBackplane backplane = null, ILoggerFactory loggers = null)
+  public WebSocketHub(IWebSocketBackplane backplane, ILoggerFactory loggers, Telemetry telemetry)
   {
     Logger = (loggers ?? NullLoggerFactory.Instance).CreateLogger("PureGate.WebSocket");
     if (backplane is not null)
-      Backplane = new HubBackplane(backplane, Logger);
+      Backplane = new HubBackplane(backplane, Logger, telemetry);
   }
 
   internal HubBackplane Backplane { get; }
@@ -162,11 +162,12 @@ sealed class WebSocketHub : IWebSocketHub
       delivery.Dispose();
     }
 
-    return message is null ? default : Backplane.PublishAsync(topic, message, cancellationToken);
+    return message is null ? default : Backplane.PublishAsync(topic, target.Kind, message, cancellationToken);
   }
 
   // A message from another server, through the backplane, for this server's connections of its target. One that
-  // cannot be read is logged and dropped: nothing here throws back into the backplane.
+  // cannot be read is logged and dropped: nothing here throws back into the backplane. This server's own messages
+  // are skipped without a count.
   internal void Receive(ReadOnlyMemory<byte> message)
   {
     try
@@ -177,25 +178,28 @@ sealed class WebSocketHub : IWebSocketHub
       if (!FirstMappings.TryGetValue(read.Event, out var relayed))
       {
         Log.BackplaneEventNotMapped(Logger, read.Event);
+        Backplane.Received("not_mapped");
         return;
       }
 
-      relayed.Relay(this, in read, message[read.PayloadOffset..]);
+      Backplane.Received(relayed.Relay(this, in read, message[read.PayloadOffset..]) ? "delivered" : "unreadable");
     }
     catch (Exception exception)
     {
       Log.BackplaneMessageDropped(Logger, exception);
+      Backplane.Received("unreadable");
     }
   }
 
-  internal void Relay<T>(ServerEventInfo<T> first, in BackplaneMessage read, ReadOnlyMemory<byte> payload)
+  // Delivers a message from another server. False when its payload could not be read for some of the connections.
+  internal bool Relay<T>(ServerEventInfo<T> first, in BackplaneMessage read, ReadOnlyMemory<byte> payload)
   {
     if (read.Binary != first.Codecs[0].IsBinary)
       throw new InvalidDataException($"The event '{first.Name}' came as {(read.Binary ? "bytes" : "JSON")}, which its type here does not take.");
 
     WebSocketConnection only = null;
     if (read.Kind == TargetKind.Connection && !Connections.TryGetValue(read.Key, out only))
-      return;
+      return true;
 
     var delivery = new Delivery<T>(first, payload, dispatch: read.Kind != TargetKind.Connection);
     try
@@ -207,8 +211,11 @@ sealed class WebSocketHub : IWebSocketHub
       delivery.Dispose();
     }
 
-    if (delivery.Unreadable is { } exception)
-      Log.BackplanePayloadUnreadable(Logger, first.Name, exception);
+    if (delivery.Unreadable is not { } exception)
+      return true;
+
+    Log.BackplanePayloadUnreadable(Logger, first.Name, exception);
+    return false;
   }
 
   void Deliver<T>(ref Delivery<T> delivery, TargetKind kind, string key, WebSocketConnection only)

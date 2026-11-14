@@ -202,6 +202,64 @@ public sealed class BackplaneTests
     Assert.That(SecondBackplane.FailedSubscribes, Is.EqualTo(1));
   }
 
+  // On servers of its own, so no other test's connections change what is measured.
+  [Test]
+  public async Task MeasuresTheBackplane()
+  {
+    var bus = new TestBus();
+    var (first, firstBackplane) = await StartServerAsync(bus);
+    var (second, secondBackplane) = await StartServerAsync(bus);
+    try
+    {
+      var sent = new System.Collections.Concurrent.ConcurrentQueue<TelemetryTests.Measurement>();
+      var received = new System.Collections.Concurrent.ConcurrentQueue<TelemetryTests.Measurement>();
+      using var sending = TelemetryTests.Listen(first, sent);
+      using var receiving = TelemetryTests.Listen(second, received);
+
+      var member = await ConnectAsync(second, user: "grace");
+      await bus.UntilAsync(() => bus.IsSubscribed(secondBackplane, "user:grace"));
+      secondBackplane.FailingSubscribes = 1;
+      await member.CallAsync(1, "events.join", "\"room-m\"");
+      await bus.UntilAsync(() => bus.IsSubscribed(secondBackplane, "group:room-m"));
+
+      await Hub(first).Group("room-m").SendAsync(TestApi.Broadcast, new Note("measured", 9));
+      firstBackplane.PublishFails = true;
+      await Assert.ThrowsAsync<IOException>(async () => await Hub(first).All.SendAsync(TestApi.Broadcast, new Note("lost", 9)));
+      firstBackplane.PublishFails = false;
+
+      // From a server that maps no "nowhere": version 1, server "x", All, no key, the name, no flags, then "1".
+      bus.Publish("all", [1, 1, (byte)'x', 1, 0, 7, .. "nowhere"u8, 0, (byte)'1']);
+      bus.Publish("all", [99]);
+      Assert.That(Note(await NextEventAsync(member)), Is.EqualTo("measured"));
+
+      await member.CloseAsync();
+      await member.DisposeAsync();
+      await bus.UntilAsync(() => !bus.IsSubscribed(secondBackplane, "group:room-m") && !bus.IsSubscribed(secondBackplane, "user:grace"));
+      await bus.UntilAsync(() => received.Count(m => m.Instrument == "puregate.websocket.backplane.received") == 3);
+
+      var publishes = sent.Where(m => m.Instrument == "puregate.websocket.backplane.publish.duration")
+        .Select(m => $"{m.Tags["puregate.websocket.target"]} {m.Tags["puregate.websocket.outcome"]}");
+      Assert.That(publishes, Is.EquivalentTo(new[] { "group ok", "all failed" }));
+
+      var outcomes = received.Where(m => m.Instrument == "puregate.websocket.backplane.received")
+        .Select(m => m.Tags["puregate.websocket.outcome"]);
+      Assert.That(outcomes, Is.EquivalentTo(new[] { "delivered", "not_mapped", "unreadable" }));
+
+      // grace's user topic, then room-m after one failed try, then both again when grace leaves.
+      var subscriptions = received.Where(m => m.Instrument == "puregate.websocket.backplane.subscriptions").Select(m => m.Value);
+      Assert.That(subscriptions, Is.EqualTo(new double[] { 1, 1, -1, -1 }));
+      var failure = received.Single(m => m.Instrument == "puregate.websocket.backplane.subscription_failures");
+      Assert.That(failure.Tags["puregate.websocket.call"], Is.EqualTo("subscribe"));
+    }
+    finally
+    {
+      await first.DisposeAsync();
+      await second.DisposeAsync();
+    }
+
+    Assert.That(bus.Violations, Is.Empty);
+  }
+
   [Test]
   public async Task RefusesTwoServerEventsOfOneName()
   {
