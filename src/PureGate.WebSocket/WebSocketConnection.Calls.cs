@@ -10,8 +10,10 @@ using PureGate.WebSocket.Transport;
 
 namespace PureGate.WebSocket;
 
-// Calls from the browser. Every Request gets exactly one Response; the call leaves the window before its Response
-// is written, so the browser's next call never meets a window the server still counts as full.
+/// <summary>
+/// Calls from the browser. Every Request gets exactly one Response; the call leaves the window before its Response
+/// is written, so the browser's next call never meets a window the server still counts as full.
+/// </summary>
 public sealed partial class WebSocketConnection
 {
   const string GenericFailure = "The handler failed.";

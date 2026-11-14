@@ -1,8 +1,10 @@
 namespace PureGate.WebSocket;
 
-// An endpoint's API as TypeScript: the contract.ts browsers are typed against (docs/PLAN-SERVER.md, Contract
-// generation). From MapContract over HTTP, or from WebSocketEndpointBuilder.Contract, for instance in a test that
-// fails when the committed contract.ts is stale.
+/// <summary>
+/// An endpoint's API as TypeScript: the contract.ts browsers are typed against (docs/PLAN-SERVER.md, Contract
+/// generation). From MapContract over HTTP, or from WebSocketEndpointBuilder.Contract, for instance in a test that
+/// fails when the committed contract.ts is stale.
+/// </summary>
 public sealed class WebSocketContract
 {
   internal WebSocketContract(string typeScript, string hash)
@@ -11,25 +13,35 @@ public sealed class WebSocketContract
     Hash = hash;
   }
 
-  // The contents of contract.ts.
+  /// <summary>
+  /// The contents of contract.ts.
+  /// </summary>
   public string TypeScript { get; }
 
-  // 16 hex digits over the names and schemas the contract describes, not over the TypeScript text, so an improved
-  // emitter does not change it. Browsers send it in Hello.
+  /// <summary>
+  /// 16 hex digits over the names and schemas the contract describes, not over the TypeScript text, so an improved
+  /// emitter does not change it. Browsers send it in Hello.
+  /// </summary>
   public string Hash { get; }
 }
 
-// How the contract describes .NET types.
+/// <summary>
+/// How the contract describes .NET types.
+/// </summary>
 public sealed class ContractOptions
 {
   internal Dictionary<Type, string> Overrides { get; } = [];
 
-  // Whether reference-type properties and results may be null in TypeScript (T | null). Off by default: types from
-  // code without nullable annotations would otherwise need a null check at every property.
+  /// <summary>
+  /// Whether reference-type properties and results may be null in TypeScript (T | null). Off by default: types from
+  /// code without nullable annotations would otherwise need a null check at every property.
+  /// </summary>
   public bool ReferenceTypesCanBeNull { get; set; }
 
-  // Describes T with this TypeScript type instead, for types with converters the schema exporter cannot see
-  // into, such as MapType<Money>("string").
+  /// <summary>
+  /// Describes T with this TypeScript type instead, for types with converters the schema exporter cannot see
+  /// into, such as MapType&lt;Money&gt;("string").
+  /// </summary>
   public ContractOptions MapType<T>(string typeScript)
   {
     ArgumentException.ThrowIfNullOrWhiteSpace(typeScript);
@@ -47,15 +59,23 @@ public sealed class ContractOptions
   }
 }
 
-// What the server does when a browser's contract hash does not match its own.
+/// <summary>
+/// What the server does when a browser's contract hash does not match its own.
+/// </summary>
 public enum ContractMismatchPolicy
 {
-  // Nothing.
+  /// <summary>
+  /// Nothing.
+  /// </summary>
   Ignore,
 
-  // Logs it, and tells the browser in Welcome, which warns in its console.
+  /// <summary>
+  /// Logs it, and tells the browser in Welcome, which warns in its console.
+  /// </summary>
   Warn,
 
-  // Closes the connection with 4004 (contract_rejected).
+  /// <summary>
+  /// Closes the connection with 4004 (contract_rejected).
+  /// </summary>
   Reject,
 }

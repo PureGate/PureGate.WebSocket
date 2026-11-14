@@ -6,6 +6,8 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsAotCompatible>true</IsAotCompatible>
+    <!-- The XML docs ship in the package for IntelliSense, and a public API without one fails the build. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <!-- ASP.NET Core is part of the shared framework, not a package. -->

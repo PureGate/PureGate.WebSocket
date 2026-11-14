@@ -6,7 +6,9 @@ using PureGate.WebSocket.Serialization;
 
 namespace PureGate.WebSocket;
 
-// Maps what browsers can call and send: on the endpoint itself, or on a group whose names share a prefix.
+/// <summary>
+/// Maps what browsers can call and send: on the endpoint itself, or on a group whose names share a prefix.
+/// </summary>
 public abstract class WebSocketBuilder
 {
   private protected WebSocketBuilder(EndpointState endpoint, string prefix)
@@ -17,13 +19,19 @@ public abstract class WebSocketBuilder
 
   internal EndpointState Endpoint { get; }
 
-  // Names mapped here start with this and a dot. Empty on the endpoint.
+  /// <summary>
+  /// Names mapped here start with this and a dot. Empty on the endpoint.
+  /// </summary>
   public string Prefix { get; }
 
-  // A group whose names start with this one's prefix, prefix and a dot.
+  /// <summary>
+  /// A group whose names start with this one's prefix, prefix and a dot.
+  /// </summary>
   public WebSocketGroup MapGroup(string prefix) => new(Endpoint, FullName(prefix));
 
-  // An operation the browser calls with a request and gets a result from.
+  /// <summary>
+  /// An operation the browser calls with a request and gets a result from.
+  /// </summary>
   public OperationBuilder MapRequest<TRequest, TResponse>(
       string name,
       Func<TRequest, WebSocketCall, CancellationToken, ValueTask<TResponse>> handler)
@@ -32,7 +40,9 @@ public abstract class WebSocketBuilder
     return Add(new RequestOperation<TRequest, TResponse>(FullName(name), Codecs<TRequest>(), Codecs<TResponse>(), handler));
   }
 
-  // An operation without a request, such as "orders.latest".
+  /// <summary>
+  /// An operation without a request, such as "orders.latest".
+  /// </summary>
   public OperationBuilder MapRequest<TResponse>(
       string name,
       Func<WebSocketCall, CancellationToken, ValueTask<TResponse>> handler)
@@ -45,7 +55,9 @@ public abstract class WebSocketBuilder
       (_, call, cancellationToken) => handler(call, cancellationToken)));
   }
 
-  // An operation without a result: the browser's call completes when the handler does.
+  /// <summary>
+  /// An operation without a result: the browser's call completes when the handler does.
+  /// </summary>
   public OperationBuilder MapRequest<TRequest>(
       string name,
       Func<TRequest, WebSocketCall, CancellationToken, ValueTask> handler)
@@ -62,7 +74,9 @@ public abstract class WebSocketBuilder
       }));
   }
 
-  // An operation with neither a request nor a result.
+  /// <summary>
+  /// An operation with neither a request nor a result.
+  /// </summary>
   public OperationBuilder MapRequest(string name, Func<WebSocketCall, CancellationToken, ValueTask> handler)
   {
     ArgumentNullException.ThrowIfNull(handler);
@@ -77,8 +91,10 @@ public abstract class WebSocketBuilder
       }));
   }
 
-  // A stream the browser opens and reads. The handler's items are pulled only as fast as the browser takes them, and
-  // its token fires when the browser stops reading.
+  /// <summary>
+  /// A stream the browser opens and reads. The handler's items are pulled only as fast as the browser takes them, and
+  /// its token fires when the browser stops reading.
+  /// </summary>
   public OperationBuilder MapStream<TRequest, TItem>(
       string name,
       Func<TRequest, WebSocketCall, CancellationToken, IAsyncEnumerable<TItem>> handler)
@@ -87,7 +103,9 @@ public abstract class WebSocketBuilder
     return Add(new StreamOperation<TRequest, TItem>(FullName(name), Codecs<TRequest>(), Codecs<TItem>(), handler));
   }
 
-  // A stream without a request, such as "prices.all".
+  /// <summary>
+  /// A stream without a request, such as "prices.all".
+  /// </summary>
   public OperationBuilder MapStream<TItem>(
       string name,
       Func<WebSocketCall, CancellationToken, IAsyncEnumerable<TItem>> handler)
@@ -100,8 +118,10 @@ public abstract class WebSocketBuilder
       (_, call, cancellationToken) => handler(call, cancellationToken)));
   }
 
-  // A stream the browser sends. The handler reads its items, which arrive only as fast as it takes them, and returns
-  // the browser's result.
+  /// <summary>
+  /// A stream the browser sends. The handler reads its items, which arrive only as fast as it takes them, and returns
+  /// the browser's result.
+  /// </summary>
   public OperationBuilder MapUpload<TRequest, TItem, TResponse>(
       string name,
       Func<TRequest, IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask<TResponse>> handler)
@@ -115,7 +135,9 @@ public abstract class WebSocketBuilder
       handler));
   }
 
-  // An upload without a request.
+  /// <summary>
+  /// An upload without a request.
+  /// </summary>
   public OperationBuilder MapUpload<TItem, TResponse>(
       string name,
       Func<IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask<TResponse>> handler)
@@ -129,7 +151,9 @@ public abstract class WebSocketBuilder
       (_, items, call, cancellationToken) => handler(items, call, cancellationToken)));
   }
 
-  // An upload without a result: the browser's upload completes when the handler does.
+  /// <summary>
+  /// An upload without a result: the browser's upload completes when the handler does.
+  /// </summary>
   public OperationBuilder MapUpload<TRequest, TItem>(
       string name,
       Func<TRequest, IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask> handler)
@@ -147,7 +171,9 @@ public abstract class WebSocketBuilder
       }));
   }
 
-  // An upload with neither a request nor a result.
+  /// <summary>
+  /// An upload with neither a request nor a result.
+  /// </summary>
   public OperationBuilder MapUpload<TItem>(
       string name,
       Func<IAsyncEnumerable<TItem>, WebSocketCall, CancellationToken, ValueTask> handler)
@@ -165,7 +191,9 @@ public abstract class WebSocketBuilder
       }));
   }
 
-  // An event the browser sends. Events from one connection are handled in order (PureGateWebSocketOptions.EventOrdering).
+  /// <summary>
+  /// An event the browser sends. Events from one connection are handled in order (PureGateWebSocketOptions.EventOrdering).
+  /// </summary>
   public OperationBuilder MapClientEvent<T>(string name, Func<T, WebSocketCall, CancellationToken, ValueTask> handler)
   {
     ArgumentNullException.ThrowIfNull(handler);
@@ -187,7 +215,9 @@ public abstract class WebSocketBuilder
   }
 }
 
-// A group of names under one prefix, from MapGroup.
+/// <summary>
+/// A group of names under one prefix, from MapGroup.
+/// </summary>
 public sealed class WebSocketGroup : WebSocketBuilder
 {
   internal WebSocketGroup(EndpointState endpoint, string prefix)
@@ -196,7 +226,9 @@ public sealed class WebSocketGroup : WebSocketBuilder
   }
 }
 
-// The endpoint from MapPureGateWebSocket. Conventions such as RequireAuthorization apply to its upgrade request.
+/// <summary>
+/// The endpoint from MapPureGateWebSocket. Conventions such as RequireAuthorization apply to its upgrade request.
+/// </summary>
 public sealed class WebSocketEndpointBuilder : WebSocketBuilder, IEndpointConventionBuilder
 {
   readonly IEndpointConventionBuilder Inner;
@@ -209,18 +241,24 @@ public sealed class WebSocketEndpointBuilder : WebSocketBuilder, IEndpointConven
     Routes = routes;
   }
 
-  // The endpoint's API as TypeScript, as MapContract serves it. Reading it freezes the mapping.
+  /// <summary>
+  /// The endpoint's API as TypeScript, as MapContract serves it. Reading it freezes the mapping.
+  /// </summary>
   public WebSocketContract Contract => Endpoint.Contract;
 
-  // Serves contract.ts over HTTP GET, for developers to pull into the browser app. It shows the whole API, so map it
-  // in development only, or put it behind authorization with the conventions this returns.
+  /// <summary>
+  /// Serves contract.ts over HTTP GET, for developers to pull into the browser app. It shows the whole API, so map it
+  /// in development only, or put it behind authorization with the conventions this returns.
+  /// </summary>
   public IEndpointConventionBuilder MapContract([StringSyntax("Route")] string pattern)
   {
     ArgumentNullException.ThrowIfNull(pattern);
     return Routes.MapGet(pattern, Endpoint.WriteContractAsync);
   }
 
-  // An event this endpoint's connections can be sent. Its name is the descriptor's, whatever the prefix.
+  /// <summary>
+  /// An event this endpoint's connections can be sent. Its name is the descriptor's, whatever the prefix.
+  /// </summary>
   public WebSocketEndpointBuilder MapEvent<T>(ServerEvent<T> serverEvent)
   {
     ArgumentNullException.ThrowIfNull(serverEvent);
@@ -228,7 +266,9 @@ public sealed class WebSocketEndpointBuilder : WebSocketBuilder, IEndpointConven
     return this;
   }
 
-  // A call this endpoint's browsers answer. Its name is the descriptor's, whatever the prefix.
+  /// <summary>
+  /// A call this endpoint's browsers answer. Its name is the descriptor's, whatever the prefix.
+  /// </summary>
   public WebSocketEndpointBuilder MapClientRequest<TRequest, TResponse>(ClientRequest<TRequest, TResponse> request)
   {
     ArgumentNullException.ThrowIfNull(request);
@@ -236,7 +276,9 @@ public sealed class WebSocketEndpointBuilder : WebSocketBuilder, IEndpointConven
     return this;
   }
 
-  // Runs when a session starts, after Welcome and before the browser's first calls are handled.
+  /// <summary>
+  /// Runs when a session starts, after Welcome and before the browser's first calls are handled.
+  /// </summary>
   public WebSocketEndpointBuilder OnConnected(Func<WebSocketConnection, CancellationToken, ValueTask> handler)
   {
     ArgumentNullException.ThrowIfNull(handler);
@@ -244,7 +286,9 @@ public sealed class WebSocketEndpointBuilder : WebSocketBuilder, IEndpointConven
     return this;
   }
 
-  // Runs when a session ends.
+  /// <summary>
+  /// Runs when a session ends.
+  /// </summary>
   public WebSocketEndpointBuilder OnDisconnected(Func<WebSocketConnection, CancellationToken, ValueTask> handler)
   {
     ArgumentNullException.ThrowIfNull(handler);
@@ -252,12 +296,16 @@ public sealed class WebSocketEndpointBuilder : WebSocketBuilder, IEndpointConven
     return this;
   }
 
+  /// <inheritdoc/>
   public void Add(Action<EndpointBuilder> convention) => Inner.Add(convention);
 
+  /// <inheritdoc/>
   public void Finally(Action<EndpointBuilder> finallyConvention) => Inner.Finally(finallyConvention);
 }
 
-// One mapped operation, stream or event: its authorization and filters.
+/// <summary>
+/// One mapped operation, stream or event: its authorization and filters.
+/// </summary>
 public sealed class OperationBuilder
 {
   readonly EndpointState Endpoint;
@@ -270,13 +318,17 @@ public sealed class OperationBuilder
 
   internal Operation Operation { get; }
 
-  // The full name browsers use, such as "orders.get".
+  /// <summary>
+  /// The full name browsers use, such as "orders.get".
+  /// </summary>
   public string Name => Operation.Name;
 
-  // Every call must pass these policies, evaluated with IAuthorizationService for the connection's user, or the
-  // default policy when none is named. The outcome is cached per connection until its user changes. A refused call
-  // fails with unauthorized, or forbidden for an authenticated user, before its handler runs; a refused event is
-  // dropped. Needs services.AddAuthorization().
+  /// <summary>
+  /// Every call must pass these policies, evaluated with IAuthorizationService for the connection's user, or the
+  /// default policy when none is named. The outcome is cached per connection until its user changes. A refused call
+  /// fails with unauthorized, or forbidden for an authenticated user, before its handler runs; a refused event is
+  /// dropped. Needs services.AddAuthorization().
+  /// </summary>
   public OperationBuilder RequireAuthorization(params string[] policies)
   {
     ArgumentNullException.ThrowIfNull(policies);
@@ -286,7 +338,9 @@ public sealed class OperationBuilder
     return this;
   }
 
-  // Runs filter around every call's handler, after authorization and the filters added before it.
+  /// <summary>
+  /// Runs filter around every call's handler, after authorization and the filters added before it.
+  /// </summary>
   public OperationBuilder AddFilter(WebSocketFilter filter)
   {
     ArgumentNullException.ThrowIfNull(filter);

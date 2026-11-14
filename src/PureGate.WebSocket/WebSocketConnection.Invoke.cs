@@ -13,16 +13,20 @@ public sealed partial class WebSocketConnection
   SemaphoreSlim ClientCallSlots;
   uint LastInvokeId;
 
-  // Calls the browser and waits for its answer, at most PureGateWebSocketOptions.InvokeTimeout.
+  /// <summary>
+  /// Calls the browser and waits for its answer, at most PureGateWebSocketOptions.InvokeTimeout.
+  /// </summary>
   public ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
       ClientRequest<TRequest, TResponse> request,
       TRequest payload,
       CancellationToken cancellationToken = default) =>
     InvokeAsync(request, payload, Options.InvokeTimeout, cancellationToken);
 
-  // Calls the browser and waits for its answer, at most timeout (Timeout.InfiniteTimeSpan for no limit). Throws
-  // CallException when the browser's handler failed or the call timed out, and OperationCanceledException when
-  // cancellationToken fired.
+  /// <summary>
+  /// Calls the browser and waits for its answer, at most timeout (Timeout.InfiniteTimeSpan for no limit). Throws
+  /// CallException when the browser's handler failed or the call timed out, and OperationCanceledException when
+  /// cancellationToken fired.
+  /// </summary>
   public async ValueTask<TResponse> InvokeAsync<TRequest, TResponse>(
       ClientRequest<TRequest, TResponse> request,
       TRequest payload,

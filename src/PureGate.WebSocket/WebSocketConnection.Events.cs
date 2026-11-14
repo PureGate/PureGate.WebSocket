@@ -14,7 +14,9 @@ public sealed partial class WebSocketConnection
   int UncreditedEvents;
   int PickedUpEvents;
 
-  // Queues the event for this connection. Returns once it is queued, not once it arrived.
+  /// <summary>
+  /// Queues the event for this connection. Returns once it is queued, not once it arrived.
+  /// </summary>
   public ValueTask SendAsync<T>(ServerEvent<T> serverEvent, T payload, CancellationToken cancellationToken = default)
   {
     ArgumentNullException.ThrowIfNull(serverEvent);

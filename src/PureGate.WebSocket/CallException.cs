@@ -4,11 +4,17 @@ using PureGate.WebSocket.Protocol;
 
 namespace PureGate.WebSocket;
 
-// A call that failed with an error code. A handler throws it to send the browser its own code, such as
-// "not_found", with optional details. InvokeAsync throws it when the browser's handler failed, or the call
-// timed out or could not be sent.
+/// <summary>
+/// A call that failed with an error code. A handler throws it to send the browser its own code, such as
+/// "not_found", with optional details. InvokeAsync throws it when the browser's handler failed, or the call
+/// timed out or could not be sent.
+/// </summary>
 public sealed class CallException : Exception
 {
+  /// <summary>
+  /// A failure with code, one of the protocol's code names or the application's own of 1 to 64 characters of a-z, 0-9
+  /// and _, and message. details, when set, goes to the browser as JSON.
+  /// </summary>
   public CallException(string code, string message, object details = null)
     : base(message)
   {
@@ -20,11 +26,15 @@ public sealed class CallException : Exception
     Details = details;
   }
 
-  // The protocol's code name, such as "timeout", or the application's own code.
+  /// <summary>
+  /// The protocol's code name, such as "timeout", or the application's own code.
+  /// </summary>
   public string Code { get; }
 
-  // Thrown: anything the endpoint's serializer options can write as JSON. Received from a browser: a
-  // JsonElement, or null when there were none.
+  /// <summary>
+  /// Thrown: anything the endpoint's serializer options can write as JSON. Received from a browser: a
+  /// JsonElement, or null when there were none.
+  /// </summary>
   public object Details { get; }
 
   // The error of a failed Response or StreamEnd.

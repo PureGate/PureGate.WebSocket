@@ -3,7 +3,9 @@ using System.Collections.Concurrent;
 
 namespace PureGate.WebSocket;
 
-// The groups a connection is in, for hub.Group(name). Left automatically when the session ends.
+/// <summary>
+/// The groups a connection is in, for hub.Group(name). Left automatically when the session ends.
+/// </summary>
 public sealed class WebSocketGroups : IReadOnlyCollection<string>
 {
   readonly WebSocketConnection Connection;
@@ -13,8 +15,14 @@ public sealed class WebSocketGroups : IReadOnlyCollection<string>
 
   internal WebSocketGroups(WebSocketConnection connection) => Connection = connection;
 
+  /// <summary>
+  /// How many groups the connection is in.
+  /// </summary>
   public int Count => Volatile.Read(ref Names)?.Count ?? 0;
 
+  /// <summary>
+  /// Joins the group. Joining one the connection is in already does nothing.
+  /// </summary>
   public void Add(string group)
   {
     ArgumentException.ThrowIfNullOrEmpty(group);
@@ -29,6 +37,9 @@ public sealed class WebSocketGroups : IReadOnlyCollection<string>
       Connection.Endpoint.Hub.AddToGroup(Connection, group);
   }
 
+  /// <summary>
+  /// Leaves the group. False when the connection was not in it.
+  /// </summary>
   public bool Remove(string group)
   {
     ArgumentException.ThrowIfNullOrEmpty(group);
@@ -39,8 +50,12 @@ public sealed class WebSocketGroups : IReadOnlyCollection<string>
     return true;
   }
 
+  /// <summary>
+  /// Whether the connection is in the group.
+  /// </summary>
   public bool Contains(string group) => Volatile.Read(ref Names)?.ContainsKey(group) == true;
 
+  /// <inheritdoc/>
   public IEnumerator<string> GetEnumerator() =>
     Volatile.Read(ref Names) is { } names ? names.Keys.GetEnumerator() : Enumerable.Empty<string>().GetEnumerator();
 

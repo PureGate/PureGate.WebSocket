@@ -10,10 +10,15 @@ using PureGate.WebSocket.Hosting;
 
 namespace PureGate.WebSocket;
 
+/// <summary>
+/// Adds PureGate.WebSocket to an app: AddPureGateWebSocket on its services, MapPureGateWebSocket on its routes.
+/// </summary>
 public static class PureGateWebSocketExtensions
 {
-  // Registers the hub and the options every endpoint starts from. An IWebSocketBackplane registered as a service, in
-  // any order, connects the hub to the app's other servers.
+  /// <summary>
+  /// Registers the hub and the options every endpoint starts from. An IWebSocketBackplane registered as a service, in
+  /// any order, connects the hub to the app's other servers.
+  /// </summary>
   public static IServiceCollection AddPureGateWebSocket(
       this IServiceCollection services,
       Action<PureGateWebSocketOptions> configure = null)
@@ -33,8 +38,10 @@ public static class PureGateWebSocketExtensions
     return services;
   }
 
-  // Maps a PureGate.WebSocket endpoint. Requires app.UseWebSockets(). The route accepts any HTTP method, so
-  // WebSockets over HTTP/2 (CONNECT) reach it too. configure overrides the shared options for this endpoint.
+  /// <summary>
+  /// Maps a PureGate.WebSocket endpoint. Requires app.UseWebSockets(). The route accepts any HTTP method, so
+  /// WebSockets over HTTP/2 (CONNECT) reach it too. configure overrides the shared options for this endpoint.
+  /// </summary>
   public static WebSocketEndpointBuilder MapPureGateWebSocket(
       this IEndpointRouteBuilder endpoints,
       [StringSyntax("Route")] string pattern,

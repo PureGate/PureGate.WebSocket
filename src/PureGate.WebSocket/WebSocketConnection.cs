@@ -40,18 +40,26 @@ public sealed partial class WebSocketConnection
     Events = options.EventOrdering == EventOrdering.Sequential ? new EventQueue(this) : null;
   }
 
-  // The connection's id: unique, safe to log, and sent to the browser in Welcome. It stays the same when the browser
-  // resumes. With a backplane, it starts with its server's id and a dot.
+  /// <summary>
+  /// The connection's id: unique, safe to log, and sent to the browser in Welcome. It stays the same when the browser
+  /// resumes. With a backplane, it starts with its server's id and a dot.
+  /// </summary>
   public string Id { get; }
 
-  // The user of the latest upgrade request: a resume must be by the same user.
+  /// <summary>
+  /// The user of the latest upgrade request: a resume must be by the same user.
+  /// </summary>
   public ClaimsPrincipal User { get; private set; }
 
-  // The id hub.User(id) finds this connection by, from PureGateWebSocketOptions.UserId. Null without one.
+  /// <summary>
+  /// The id hub.User(id) finds this connection by, from PureGateWebSocketOptions.UserId. Null without one.
+  /// </summary>
   public string UserId { get; private set; }
 
-  // Whatever the app wants to keep with the connection. Safe to use from several handlers at once. Created the first
-  // time it is read, with one lock: only the connection's handlers contend for it.
+  /// <summary>
+  /// Whatever the app wants to keep with the connection. Safe to use from several handlers at once. Created the first
+  /// time it is read, with one lock: only the connection's handlers contend for it.
+  /// </summary>
   public IDictionary<object, object> Items
   {
     get
@@ -66,12 +74,19 @@ public sealed partial class WebSocketConnection
 
   ConcurrentDictionary<object, object> ItemsStore;
 
+  /// <summary>
+  /// The groups the connection is in, for hub.Group(name).
+  /// </summary>
   public WebSocketGroups Groups { get; }
 
-  // The latest upgrade request's context.
+  /// <summary>
+  /// The latest upgrade request's context.
+  /// </summary>
   public HttpContext HttpContext { get; private set; }
 
-  // Fires when the session ends: not when its connection drops, if the browser can still resume.
+  /// <summary>
+  /// Fires when the session ends: not when its connection drops, if the browser can still resume.
+  /// </summary>
   public CancellationToken Closed { get; }
 
   internal string SessionId { get; }
@@ -84,7 +99,9 @@ public sealed partial class WebSocketConnection
 
   internal bool IsEnded => Volatile.Read(ref Ended) != 0;
 
-  // Closes the connection for good: what is queued goes out first, then the close frame, and the session ends.
+  /// <summary>
+  /// Closes the connection for good: what is queued goes out first, then the close frame, and the session ends.
+  /// </summary>
   public ValueTask CloseAsync(WebSocketCloseStatus status = WebSocketCloseStatus.NormalClosure, string reason = "")
   {
     CloseLink(status, reason, endsSession: true);

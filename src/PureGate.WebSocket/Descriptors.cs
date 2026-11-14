@@ -3,19 +3,29 @@ using PureGate.WebSocket.Protocol;
 
 namespace PureGate.WebSocket;
 
-// An event the server sends to browsers. Declared once, usually as a static field, mapped on the endpoint with
-// MapEvent, and sent through it, so a send site never repeats a name or a type.
+/// <summary>
+/// An event the server sends to browsers. Declared once, usually as a static field, mapped on the endpoint with
+/// MapEvent, and sent through it, so a send site never repeats a name or a type.
+/// </summary>
 public sealed class ServerEvent<T>(string name)
 {
+  /// <summary>
+  /// The event's full name, such as "orders.shipped".
+  /// </summary>
   public string Name { get; } = NameCheck.Validate(name);
 
   internal byte[] NameUtf8 { get; } = Encoding.ASCII.GetBytes(name);
 }
 
-// A call the server makes to a browser, which answers it with a handler. Declared once, mapped on the endpoint
-// with MapClientRequest, and called through WebSocketConnection.InvokeAsync.
+/// <summary>
+/// A call the server makes to a browser, which answers it with a handler. Declared once, mapped on the endpoint
+/// with MapClientRequest, and called through WebSocketConnection.InvokeAsync.
+/// </summary>
 public sealed class ClientRequest<TRequest, TResponse>(string name)
 {
+  /// <summary>
+  /// The call's full name, such as "ui.confirm".
+  /// </summary>
   public string Name { get; } = NameCheck.Validate(name);
 
   internal byte[] NameUtf8 { get; } = Encoding.ASCII.GetBytes(name);

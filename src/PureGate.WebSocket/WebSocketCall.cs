@@ -3,7 +3,9 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace PureGate.WebSocket;
 
-// One call or event a handler is answering. Valid only until the handler finishes, like HttpContext.
+/// <summary>
+/// One call or event a handler is answering. Valid only until the handler finishes, like HttpContext.
+/// </summary>
 public sealed class WebSocketCall : IAsyncDisposable
 {
   readonly IServiceScopeFactory ScopeFactory;
@@ -26,17 +28,29 @@ public sealed class WebSocketCall : IAsyncDisposable
     CancellationToken = Cancellation.Token;
   }
 
+  /// <summary>
+  /// The connection the call came on.
+  /// </summary>
   public WebSocketConnection Connection { get; }
 
+  /// <summary>
+  /// The connection's user.
+  /// </summary>
   public ClaimsPrincipal User => Connection.User;
 
-  // The operation's or event's full name, such as "orders.get".
+  /// <summary>
+  /// The operation's or event's full name, such as "orders.get".
+  /// </summary>
   public string Name { get; }
 
-  // The browser's W3C traceparent, when it sent one.
+  /// <summary>
+  /// The browser's W3C traceparent, when it sent one.
+  /// </summary>
   public string TraceParent { get; }
 
-  // Services for this call: a DI scope created the first time it is read, and disposed when the handler finishes.
+  /// <summary>
+  /// Services for this call: a DI scope created the first time it is read, and disposed when the handler finishes.
+  /// </summary>
   public IServiceProvider Services
   {
     get
@@ -51,8 +65,10 @@ public sealed class WebSocketCall : IAsyncDisposable
     }
   }
 
-  // Fires when the browser cancels the call, its deadline passes, or the session ends. Valid only until the handler
-  // finishes: the server reuses it for a later call, as ASP.NET Core reuses RequestAborted.
+  /// <summary>
+  /// Fires when the browser cancels the call, its deadline passes, or the session ends. Valid only until the handler
+  /// finishes: the server reuses it for a later call, as ASP.NET Core reuses RequestAborted.
+  /// </summary>
   public CancellationToken CancellationToken { get; }
 
   internal uint Id { get; }
@@ -108,6 +124,10 @@ public sealed class WebSocketCall : IAsyncDisposable
     }
   }
 
+  /// <summary>
+  /// Ends the call: disposes its service scope and gives back what it holds. The server calls it when the handler
+  /// finishes.
+  /// </summary>
   public async ValueTask DisposeAsync()
   {
     if (HasScope)
