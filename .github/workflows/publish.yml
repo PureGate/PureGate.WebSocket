@@ -13,8 +13,8 @@ on:
   workflow_dispatch:
     inputs:
       name:
-        description: 'When you press run workflow, the NuGet and npm packages will be published.'
-        default: 'I understand.'
+        description: "When you press run workflow, the NuGet and npm packages will be published."
+        default: "I understand."
 
 permissions:
   contents: write
