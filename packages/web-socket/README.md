@@ -71,6 +71,14 @@ Calls made while reconnecting wait and go out once the connection is back. A ser
 
 A failed call rejects with `CallError`, whose `code` is the server's own, such as `not_found`, or one of the protocol's: `timeout`, `cancelled`, `unauthorized`, `forbidden`, `unknown_operation`, `invalid_payload`, `payload_too_large`, `overloaded`, `handler_failed`, `connection_closed`. `details` holds the server's JSON details, if it sent any.
 
+A `handler_failed` hides the server's exception, but carries `traceId`: the W3C trace id the server logged it under. Show it to the user, or send it to your error tracker, and it leads to the server's log entry, and to its trace when the server records spans.
+
+```ts
+} catch (error) {
+  if (error instanceof CallError && error.traceId) showError(`Something went wrong (reference ${error.traceId}).`);
+}
+```
+
 ## Environments
 
 Evergreen browsers and web workers. It needs only a global `WebSocket`, so Node 22 and later run it too.

@@ -111,6 +111,8 @@ public sealed class StreamTests
     var crashed = await client.ReceiveAsync(FrameKind.StreamEnd, 2);
     Assert.That(crashed.Error, Is.EqualTo("handler_failed"));
     Assert.That(crashed.ErrorMessage, Does.Not.Contain("secret"));
+    Assert.That(crashed.Trace, Does.Match("^00-[0-9a-f]{32}-[0-9a-f]{16}-00$"));
+    Assert.That(failed.Has(FrameFlags.HasTrace), Is.False);
   }
 
   [Test]

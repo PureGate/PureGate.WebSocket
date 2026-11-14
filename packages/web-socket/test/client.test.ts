@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ConnectOptions, connect, type WebSocketConstructor } from "../src/index.ts";
+import { errorCodeOf } from "../src/protocol/errors.ts";
 import { FrameFlags, FrameKind } from "../src/protocol/frames.ts";
 import { FakeSocket, frame, settle } from "./fake-socket.ts";
 
@@ -75,6 +76,26 @@ describe("client", () => {
     void conn.api.echo.text("queued").catch(() => undefined);
 
     await expect(conn.api.echo.text("one too many")).rejects.toMatchObject({ code: "overloaded" });
+  });
+
+  it("gives a failed call the trace id the server sent with it", async () => {
+    const { conn, socket } = start();
+    const traced = conn.api.echo.text("a");
+    const untraced = conn.api.echo.text("b");
+    const unreadable = conn.api.echo.text("c");
+    socket.open();
+    await settle();
+    socket.welcome();
+    const failed = { flags: FrameFlags.HasError | FrameFlags.HasTrace, errorCode: errorCodeOf("handler_failed") };
+    socket.receive(
+      frame(FrameKind.Response, { id: 1, ...failed, trace: "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-00" }),
+      frame(FrameKind.Response, { id: 2, flags: FrameFlags.HasError, errorCode: errorCodeOf("handler_failed") }),
+      frame(FrameKind.Response, { id: 3, ...failed, trace: "not-a-traceparent" }),
+    );
+
+    await expect(traced).rejects.toMatchObject({ code: "handler_failed", traceId: "4bf92f3577b34da6a3ce929d0e0e4736" });
+    await expect(untraced).rejects.toMatchObject({ code: "handler_failed", traceId: undefined });
+    await expect(unreadable).rejects.toMatchObject({ code: "handler_failed", traceId: undefined });
   });
 
   it("closes with a protocol error when the server breaks the protocol", async () => {

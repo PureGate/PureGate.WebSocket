@@ -66,7 +66,7 @@ Overloads drop the request or the result. The `cancellationToken` fires when the
 
 Handlers start on the connection's receive loop as soon as their message is read, so one that finishes without waiting costs no thread switch. Until its first `await`, though, a handler holds up its connection's next messages. Move blocking or CPU-heavy work off the loop with `await Task.Yield()` first, and never wait synchronously for the connection's own `InvokeAsync`: its answer arrives on the loop you would be holding.
 
-A handler that throws `CallException("code", "message", details)` fails the call with that code, which the browser sees as `CallError`. Any other exception becomes `handler_failed`, with its message kept on the server unless `IncludeExceptionDetails` is on.
+A handler that throws `CallException("code", "message", details)` fails the call with that code, which the browser sees as `CallError`. Any other exception becomes `handler_failed`, with its message kept on the server unless `IncludeExceptionDetails` is on. The server logs it with a `TraceId`, and the browser's `CallError` carries the same `traceId`, so a failure a user reports leads to its log entry. It continues the browser's `traceparent` when it sent one, and names the call's span when spans are recorded.
 
 ```csharp
 ws.MapRequest<Order>("orders.place", PlaceAsync)

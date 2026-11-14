@@ -52,6 +52,7 @@ export class FrameWriter {
       case FrameKind.StreamEnd:
         offset = writeVarint(bytes, offset, frame.id);
         if (frame.flags & FrameFlags.HasError) offset = writeError(bytes, offset, frame, messageLength);
+        if (frame.flags & FrameFlags.HasTrace) offset = writeAscii(bytes, offset, frame.trace);
         break;
 
       case FrameKind.Event:
@@ -131,6 +132,7 @@ function getBodyLength(frame: Frame, messageLength: number): number {
         length += varintLength(frame.errorCode) + varintLength(messageLength) + messageLength;
         if (frame.errorCode === 0) length += getAsciiLength(frame.errorCustom);
       }
+      if (frame.flags & FrameFlags.HasTrace) length += getAsciiLength(frame.trace);
       break;
 
     case FrameKind.Event:

@@ -35,20 +35,15 @@ const conn = connect<Contract>("/ws", { contractHash });
 
 ## Calls
 
-Deadlines and cancellation reach the server. A `CallException` becomes a `CallError` with the same code.
+Deadlines and cancellation reach the server, where the handler's `cancellationToken` fires.
 
 ```csharp
 ws.MapRequest<int, Order>("orders.get", static async (id, call, cancellationToken) =>
-  await call.Services.GetRequiredService<OrderStore>().FindAsync(id, cancellationToken)
-    ?? throw new CallException("not_found", $"Order {id} does not exist."));
+  await call.Services.GetRequiredService<OrderStore>().GetAsync(id, cancellationToken));
 ```
 
 ```ts
-try {
-  render(await conn.api.orders.get(42, { timeout: 5_000, signal }));
-} catch (error) {
-  if (error instanceof CallError && error.code === "not_found") showMissing();
-}
+const order = await conn.api.orders.get(42, { timeout: 5_000, signal });
 ```
 
 ## Streams
@@ -223,6 +218,25 @@ No reflection on the hot path. Give the serializer source-generated metadata, an
 partial class AppJson : JsonSerializerContext;
 
 builder.Services.AddPureGateWebSocket(options => options.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJson.Default));
+```
+
+## Errors
+
+A `CallException` reaches the browser as a `CallError` with its code, message and details. Any other exception stays on the server: the browser gets `handler_failed`, with a `traceId` that finds the server's log entry.
+
+```csharp
+// In a handler:
+throw new CallException("not_found", $"Order {id} does not exist.");
+```
+
+```ts
+try {
+  render(await conn.api.orders.get(42));
+} catch (error) {
+  if (!(error instanceof CallError)) throw error;
+  if (error.code === "not_found") showMissing();
+  else if (error.code === "handler_failed") showError(`Something went wrong (reference ${error.traceId}).`);
+}
 ```
 
 ## Documentation

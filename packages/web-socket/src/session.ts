@@ -957,6 +957,9 @@ export class Session {
   }
 }
 
+// A W3C traceparent, "version-traceid-spanid-flags", capturing its trace id. Later versions may add fields.
+const traceparentPattern = /^[\da-f]{2}-([\da-f]{32})-[\da-f]{16}-[\da-f]{2}/;
+
 function errorOf(frame: Frame): CallError {
   const code = frame.errorCode === 0 ? frame.errorCustom : (errorCodeNames[frame.errorCode] ?? "protocol_error");
   let details: unknown;
@@ -968,7 +971,7 @@ function errorOf(frame: Frame): CallError {
     }
   }
 
-  return new CallError(code, frame.errorMessage, details);
+  return new CallError(code, frame.errorMessage, details, traceparentPattern.exec(frame.trace)?.[1]);
 }
 
 /** A Response's outcome: its error, or its result. */

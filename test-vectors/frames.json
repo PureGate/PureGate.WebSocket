@@ -129,6 +129,33 @@
         "frames": [{ "kind": "Response", "id": 11, "error": { "code": 9, "message": "café" } }]
       },
       {
+        "description": "Response that fails with handler_failed and the server's trace",
+        "from": "server",
+        "bytes": "50 04 0c 06 09 13 'The handler failed.' 37 '00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01'",
+        "frames": [
+          {
+            "kind": "Response",
+            "id": 6,
+            "error": { "code": 9, "message": "The handler failed." },
+            "trace": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-01"
+          }
+        ]
+      },
+      {
+        "description": "StreamEnd that fails with a trace and details, in field order",
+        "from": "server",
+        "bytes": "3f 08 0c 07 09 00 37 '00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-00' '{}'",
+        "frames": [
+          {
+            "kind": "StreamEnd",
+            "id": 7,
+            "error": { "code": 9, "message": "" },
+            "trace": "00-4bf92f3577b34da6a3ce929d0e0e4736-b7ad6b7169203331-00",
+            "json": "{}"
+          }
+        ]
+      },
+      {
         "description": "Event with a trace",
         "from": "client",
         "bytes": "52 05 08 00 0f 'telemetry.click' 37 '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01' '{\"x\":1}'",
@@ -355,6 +382,12 @@
         "description": "HasError on a StreamItem",
         "from": "server",
         "bytes": "03 07 04 01",
+        "violation": "invalid_flag"
+      },
+      {
+        "description": "HasTrace on a StreamItem",
+        "from": "server",
+        "bytes": "03 07 08 01",
         "violation": "invalid_flag"
       },
       { "description": "Request with id 0", "from": "client", "bytes": "04 03 00 00 02", "violation": "invalid_id" },

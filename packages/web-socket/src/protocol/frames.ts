@@ -28,7 +28,10 @@ export const FrameFlags = {
   HasTimeout: 0x02,
   /** An error field follows the id: the exchange failed. Response and StreamEnd only. */
   HasError: 0x04,
-  /** A trace field (a W3C traceparent) follows. Request, Event and StreamOpen only. */
+  /**
+   * A trace field (a W3C traceparent) follows: the caller's trace on a Request, Event or StreamOpen, and the trace of
+   * the work that answered on a Response or StreamEnd.
+   */
   HasTrace: 0x08,
   /** The client produces this stream's items. StreamOpen only. */
   Upload: 0x10,
@@ -145,11 +148,11 @@ const allowed: readonly number[] = [
   0,
   0,
   Binary | HasTimeout | HasTrace, // Request
-  Binary | HasError, // Response
+  Binary | HasError | HasTrace, // Response
   Binary | HasTrace, // Event
   Binary | HasTrace | Upload, // StreamOpen
   Binary, // StreamItem
-  Binary | HasError, // StreamEnd
+  Binary | HasError | HasTrace, // StreamEnd
 ];
 
 function layout(kind: number): number {

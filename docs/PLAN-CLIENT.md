@@ -107,7 +107,7 @@ Call options are `{ timeout?, signal? }`. Stream options are `{ signal?, buffer?
 
 ### Errors
 
-`CallError extends Error` has `code`, `message` and `details`. `code` is one of the protocol's error names (`timeout`, `cancelled`, `unauthorized`, `forbidden`, `unknown_operation`, `invalid_payload`, `payload_too_large`, `overloaded`, `handler_failed`, `connection_closed`, `protocol_error`) or an application code such as `not_found`. Its type is the union of the known names plus `string`, so the known names still autocomplete. `details` holds the server's JSON details, or `undefined`.
+`CallError extends Error` has `code`, `message` and `details`. `code` is one of the protocol's error names (`timeout`, `cancelled`, `unauthorized`, `forbidden`, `unknown_operation`, `invalid_payload`, `payload_too_large`, `overloaded`, `handler_failed`, `connection_closed`, `protocol_error`) or an application code such as `not_found`. Its type is the union of the known names plus `string`, so the known names still autocomplete. `details` holds the server's JSON details, or `undefined`. `traceId` is the W3C trace id a `handler_failed` was logged under on the server, or `undefined`, so an error a user or an error tracker reports leads to the server's log entry.
 
 ## Typing
 

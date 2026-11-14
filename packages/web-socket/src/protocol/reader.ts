@@ -65,6 +65,7 @@ function decode(cursor: Cursor, from: Side, frame: Frame): void {
     case FrameKind.StreamEnd:
       frame.id = readId(cursor);
       if (frame.flags & FrameFlags.HasError) readError(cursor, frame);
+      if (frame.flags & FrameFlags.HasTrace) frame.trace = readTrace(cursor);
       break;
 
     case FrameKind.Event:

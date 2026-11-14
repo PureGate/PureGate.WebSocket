@@ -308,8 +308,7 @@ public sealed partial class WebSocketConnection
         SendError(call.Id, ErrorCode.PayloadTooLarge, default, "An item is larger than the browser accepts.", default, kind);
         break;
       default:
-        Log.HandlerFailed(Logger, Id, call.Name, failure);
-        SendError(call.Id, ErrorCode.HandlerFailed, default, Options.IncludeExceptionDetails ? failure.Message : GenericFailure, default, kind);
+        SendHandlerFailed(call, failure, kind, Log.HandlerFailed);
         break;
     }
   }

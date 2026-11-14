@@ -43,6 +43,8 @@ static class FrameWriter
         offset = WriteVarint(span, offset, frame.Id);
         if (frame.Has(FrameFlags.HasError))
           offset = WriteError(span, offset, in frame);
+        if (frame.Has(FrameFlags.HasTrace))
+          offset = WriteString(span, offset, frame.Trace);
         break;
 
       case FrameKind.Event:
@@ -103,6 +105,8 @@ static class FrameWriter
         length += Varint.GetLength(frame.Id);
         if (frame.Has(FrameFlags.HasError))
           length += GetErrorLength(in frame);
+        if (frame.Has(FrameFlags.HasTrace))
+          length += GetStringLength(frame.Trace);
         break;
 
       case FrameKind.Event:

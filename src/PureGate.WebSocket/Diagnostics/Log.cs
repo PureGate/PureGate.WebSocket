@@ -24,11 +24,12 @@ static partial class Log
   [LoggerMessage(6, LogLevel.Error, "An OnDisconnected handler failed for connection {ConnectionId}.")]
   public static partial void DisconnectedHandlerFailed(ILogger logger, string connectionId, Exception exception);
 
-  [LoggerMessage(7, LogLevel.Error, "The handler of {Operation} failed for connection {ConnectionId}.")]
-  public static partial void HandlerFailed(ILogger logger, string connectionId, string operation, Exception exception);
+  // TraceId is the one the browser's CallError carries.
+  [LoggerMessage(7, LogLevel.Error, "The handler of {Operation} failed for connection {ConnectionId}, in trace {TraceId}.")]
+  public static partial void HandlerFailed(ILogger logger, string connectionId, string operation, string traceId, Exception exception);
 
-  [LoggerMessage(8, LogLevel.Error, "The result of {Operation} could not be written for connection {ConnectionId}.")]
-  public static partial void ResultNotWritten(ILogger logger, string connectionId, string operation, Exception exception);
+  [LoggerMessage(8, LogLevel.Error, "The result of {Operation} could not be written for connection {ConnectionId}, in trace {TraceId}.")]
+  public static partial void ResultNotWritten(ILogger logger, string connectionId, string operation, string traceId, Exception exception);
 
   [LoggerMessage(9, LogLevel.Warning, "The details of a CallException could not be written for connection {ConnectionId}; it was sent without them.")]
   public static partial void DetailsNotWritten(ILogger logger, string connectionId, Exception exception);

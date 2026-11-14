@@ -74,6 +74,8 @@ ref struct FrameReader
         frame.Id = ReadId(body, ref offset);
         if (frame.Has(FrameFlags.HasError))
           frame.ErrorMessage = ReadError(body, ref offset, out frame.ErrorCode, out frame.ErrorCustom);
+        if (frame.Has(FrameFlags.HasTrace))
+          frame.Trace = ReadTrace(body, ref offset);
         break;
 
       case FrameKind.Event:

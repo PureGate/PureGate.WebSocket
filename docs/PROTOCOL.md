@@ -39,11 +39,11 @@ A sender may put any number of frames in one message, up to the receiver's limit
 | 1 | Hello | client | JSON | no |
 | 2 | Welcome | server | JSON | no |
 | 3 | Request | both | `flags id name [timeout] [trace] payload` | yes |
-| 4 | Response | both | `flags id [error] payload` | yes |
+| 4 | Response | both | `flags id [error] [trace] payload` | yes |
 | 5 | Event | both | `flags name [trace] payload` | yes |
 | 6 | StreamOpen | client | `flags id name credit:varint [trace] payload` | yes |
 | 7 | StreamItem | the stream's producer | `flags id payload` | yes |
-| 8 | StreamEnd | the stream's producer | `flags id [error] payload` | yes |
+| 8 | StreamEnd | the stream's producer | `flags id [error] [trace] payload` | yes |
 | 9 | Credit | both | `id:varint amount:varint` | yes |
 | 10 | Cancel | both | `id:varint` | yes |
 | 11 | Ack | both | `count:varint` | no |
@@ -62,7 +62,7 @@ Kinds 0 and 17–255 are reserved. Receiving a reserved kind, or a kind from the
 | 0 | Binary | The payload is raw bytes, not a value in the connection's format. | Request, Response, Event, StreamOpen, StreamItem, StreamEnd |
 | 1 | HasTimeout | A `timeout:varint` field follows the name: the milliseconds the caller still waits, measured when the frame is sent. | Request |
 | 2 | HasError | An `error` field follows the id. The exchange failed. | Response, StreamEnd |
-| 3 | HasTrace | A `trace:str` field follows: a W3C `traceparent`, 1–256 bytes of printable ASCII (0x21–0x7E). | Request, Event, StreamOpen |
+| 3 | HasTrace | A `trace:str` field follows: a W3C `traceparent`, 1–256 bytes of printable ASCII (0x21–0x7E). On a Request, Event or StreamOpen, the caller's trace; on a Response or StreamEnd, the trace of the work that answered. | Request, Response, Event, StreamOpen, StreamEnd |
 | 4 | Upload | The client produces this stream's items (an upload) instead of reading them. | StreamOpen |
 | 5–7 | | Reserved, must be 0. | |
 
@@ -129,7 +129,7 @@ error = code:varint  [custom:str]  message:str
 | 6 | `invalid_payload` | The payload could not be read as the operation's request type. |
 | 7 | `payload_too_large` | The payload exceeds a limit. |
 | 8 | `overloaded` | The receiver refused the work: rate limit, memory budget or queue. |
-| 9 | `handler_failed` | The handler threw. The message is generic unless the server includes exception details. |
+| 9 | `handler_failed` | The handler threw. The message is generic unless the server includes exception details. The server sends it with a trace, the one it logged the failure under. |
 | 10 | `connection_closed` | The connection closed before the exchange finished. Mostly produced locally. |
 | 11 | `protocol_error` | The peer broke this protocol. Produced locally. |
 

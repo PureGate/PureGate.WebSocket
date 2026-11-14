@@ -74,7 +74,10 @@ describe("streams", () => {
     expect(numbers).toEqual([1, 2]);
     expect(failure).toBeInstanceOf(CallError);
     expect(failure).toMatchObject({ code: "broken", message: "The feed broke.", details: { id: 2 } });
-    await expect(collect(conn.streams.feed.crash())).rejects.toMatchObject({ code: "handler_failed" });
+    await expect(collect(conn.streams.feed.crash())).rejects.toMatchObject({
+      code: "handler_failed",
+      traceId: expect.stringMatching(/^[\da-f]{32}$/),
+    });
   });
 
   it("throws cancelled when the signal aborts, dropping what was buffered", async () => {

@@ -139,6 +139,27 @@ public sealed class TelemetryTests
   }
 
   [Test]
+  public async Task AnswersHandlerFailuresWithTheirSpan()
+  {
+    var activities = new ConcurrentQueue<Activity>();
+    using var listener = Trace(activities);
+    ActivitySource.AddActivityListener(listener);
+    await using var host = await TestHost.StartAsync();
+    await using var client = await host.ConnectAndHelloAsync();
+
+    var crash = Outgoing.Request(1, "fail.crash");
+    crash.Flags = FrameFlags.HasTrace;
+    crash.Trace = TraceParent;
+    await client.SendAsync(crash);
+    var response = await client.ReceiveAsync(FrameKind.Response, 1);
+    await Task.Delay(100);
+
+    var span = activities.Single(activity => activity.TraceId.ToHexString() == TraceId && activity.OperationName == "fail.crash");
+    Assert.That(response.Trace, Is.EqualTo(span.Id));
+    Assert.That(response.Trace, Does.EndWith("-01"));
+  }
+
+  [Test]
   public async Task CarriesTheTraceToTheBrowsersHandler()
   {
     var activities = new ConcurrentQueue<Activity>();

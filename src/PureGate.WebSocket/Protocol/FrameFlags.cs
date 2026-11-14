@@ -15,7 +15,8 @@ enum FrameFlags : byte
   // An error field follows the id: the exchange failed. Response and StreamEnd only.
   HasError = 1 << 2,
 
-  // A trace field (a W3C traceparent) follows. Request, Event and StreamOpen only.
+  // A trace field (a W3C traceparent) follows: the caller's trace on a Request, Event or StreamOpen, and the trace of
+  // the work that answered on a Response or StreamEnd.
   HasTrace = 1 << 3,
 
   // The client produces this stream's items. StreamOpen only.

@@ -115,7 +115,7 @@ How a handler's outcome reaches the caller:
 | Cancelled by the caller | `cancelled`, which the caller has already stopped waiting for |
 | Deadline passed | `timeout` |
 | Request payload unreadable | `invalid_payload`, before the handler runs |
-| Throws anything else | `handler_failed`, with the exception message only if `IncludeExceptionDetails` is on |
+| Throws anything else | `handler_failed`, with the exception message only if `IncludeExceptionDetails` is on, and the trace the failure is logged under |
 | Returns a result larger than the client's `maxMessage` | `payload_too_large` |
 
 ### Options
@@ -268,7 +268,7 @@ export const contractHash = "9f3a1c0b7d2e4a65";
 - **Authorization per operation.** `RequireAuthorization(policies)` is evaluated with `IAuthorizationService` against the connection's user, and the result is cached per connection and policy. A failure answers `forbidden`.
 - **Limits.** The defaults above bound memory, concurrency and queues for every connection, including ones still in the handshake.
 - **Rate limiting.** An optional `RateLimiter` per connection, from `System.Threading.RateLimiting` in the shared framework. A request over the limit gets `overloaded`.
-- **Errors.** Exception messages stay on the server unless `IncludeExceptionDetails` is on.
+- **Errors.** Exception messages stay on the server unless `IncludeExceptionDetails` is on. A `handler_failed` carries the trace its log entry names instead: the call's span when one is recorded, otherwise a span id of its own in the browser's trace, or in a new one.
 - **Compression** is off by default. When a secret and attacker-controlled text share a compressed message, the compressed size can leak the secret (the CRIME/BREACH class of attacks). Enable it only for endpoints where that cannot happen.
 - **Hostile input.** Fuzz tests feed random and mutated frames, broken JSON, window and name-table abuse, oversized messages, and handshakes that never finish. The server must close with the right code and leak nothing.
 

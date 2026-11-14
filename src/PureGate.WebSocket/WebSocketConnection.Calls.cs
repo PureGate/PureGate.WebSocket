@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using PureGate.WebSocket.Diagnostics;
 using PureGate.WebSocket.Hosting;
 using PureGate.WebSocket.Protocol;
@@ -223,8 +225,7 @@ public sealed partial class WebSocketConnection
     }
     catch (Exception exception)
     {
-      Log.ResultNotWritten(Logger, Id, call.Name, exception);
-      SendError(call.Id, ErrorCode.HandlerFailed, default, Options.IncludeExceptionDetails ? exception.Message : GenericFailure, default);
+      SendHandlerFailed(call, exception, FrameKind.Response, Log.ResultNotWritten);
     }
     finally
     {
@@ -264,23 +265,51 @@ public sealed partial class WebSocketConnection
     }
   }
 
-  // A failed Response, or a failed StreamEnd.
+  // handler_failed, logged and answered with the same trace, so a failure the browser reports leads to its log entry.
+  // The exception's message reaches the browser only with IncludeExceptionDetails.
+  void SendHandlerFailed(
+      WebSocketCall call,
+      Exception failure,
+      FrameKind kind,
+      Action<ILogger, string, string, string, Exception> log)
+  {
+    var trace = FailureTrace(call);
+    log(Logger, Id, call.Name, trace[3..35], failure);
+
+    var message = Options.IncludeExceptionDetails ? failure.Message : GenericFailure;
+    SendError(call.Id, ErrorCode.HandlerFailed, default, message, default, kind, Encoding.ASCII.GetBytes(trace));
+  }
+
+  // A W3C traceparent for a failed call: its span when one is recorded, otherwise a new span id in the browser's
+  // trace, otherwise in a new trace, marked as not recorded.
+  static string FailureTrace(WebSocketCall call)
+  {
+    if (call.Activity is { IdFormat: ActivityIdFormat.W3C } activity)
+      return activity.Id;
+
+    var traceId = ActivityContext.TryParse(call.TraceParent, null, out var parent) ? parent.TraceId : ActivityTraceId.CreateRandom();
+    return $"00-{traceId.ToHexString()}-{ActivitySpanId.CreateRandom().ToHexString()}-00";
+  }
+
+  // A failed Response, or a failed StreamEnd, with the trace of the work that failed when there is one.
   internal void SendError(
       uint id,
       ErrorCode code,
       ReadOnlySpan<byte> custom,
       string message,
       ReadOnlySpan<byte> details,
-      FrameKind kind = FrameKind.Response)
+      FrameKind kind = FrameKind.Response,
+      ReadOnlySpan<byte> trace = default)
   {
     var frame = new Frame
     {
       Kind = kind,
-      Flags = FrameFlags.HasError,
+      Flags = trace.IsEmpty ? FrameFlags.HasError : FrameFlags.HasError | FrameFlags.HasTrace,
       Id = id,
       ErrorCode = code,
       ErrorCustom = custom,
       ErrorMessage = Encoding.UTF8.GetBytes(message ?? ""),
+      Trace = trace,
       Payload = details,
     };
 

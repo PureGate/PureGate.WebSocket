@@ -2,6 +2,7 @@ using System.Net.WebSockets;
 using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using PureGate.WebSocket.Protocol;
 
 namespace PureGate.WebSocket.Test.Integration;
@@ -162,6 +163,29 @@ public sealed class CallTests
     await using var client = await host.ConnectAndHelloAsync();
 
     Assert.That((await client.CallAsync(1, "fail.crash")).ErrorMessage, Does.Contain("secret"));
+  }
+
+  [Test]
+  public async Task AnswersHandlerFailuresWithTheTraceTheyAreLoggedUnder()
+  {
+    var logs = new LogRecorder();
+    await using var host = await TestHost.StartAsync(services: services => services.AddSingleton<ILoggerProvider>(logs));
+    await using var client = await host.ConnectAndHelloAsync();
+    var request = Outgoing.Request(1, "fail.crash");
+    request.Flags = FrameFlags.HasTrace;
+    request.Trace = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+    await client.SendAsync(request);
+    var inTheBrowsersTrace = await client.ReceiveAsync(FrameKind.Response, 1);
+    var inANewTrace = await client.CallAsync(2, "fail.crash");
+
+    // Nothing records spans here, so each trace has a span id of its own, marked as not recorded.
+    Assert.That(inTheBrowsersTrace.Trace, Does.Match("^00-4bf92f3577b34da6a3ce929d0e0e4736-[0-9a-f]{16}-00$"));
+    Assert.That(inTheBrowsersTrace.Trace, Does.Not.Contain("00f067aa0ba902b7"));
+    Assert.That(inANewTrace.Trace, Does.Match("^00-[0-9a-f]{32}-[0-9a-f]{16}-00$"));
+    Assert.That(inANewTrace.Trace, Does.Not.Contain("4bf92f3577b34da6a3ce929d0e0e4736"));
+    Assert.That(
+      logs.Entries.Where(entry => entry.Event == "HandlerFailed").Select(entry => entry.Fields["TraceId"]),
+      Is.EqualTo(new[] { inTheBrowsersTrace.Trace[3..35], inANewTrace.Trace[3..35] }));
   }
 
   [Test]

@@ -20,11 +20,11 @@ static class FrameLayout
   public static FrameFlags AllowedFlags(FrameKind kind) => kind switch
   {
     FrameKind.Request => FrameFlags.Binary | FrameFlags.HasTimeout | FrameFlags.HasTrace,
-    FrameKind.Response => FrameFlags.Binary | FrameFlags.HasError,
+    FrameKind.Response => FrameFlags.Binary | FrameFlags.HasError | FrameFlags.HasTrace,
     FrameKind.Event => FrameFlags.Binary | FrameFlags.HasTrace,
     FrameKind.StreamOpen => FrameFlags.Binary | FrameFlags.HasTrace | FrameFlags.Upload,
     FrameKind.StreamItem => FrameFlags.Binary,
-    FrameKind.StreamEnd => FrameFlags.Binary | FrameFlags.HasError,
+    FrameKind.StreamEnd => FrameFlags.Binary | FrameFlags.HasError | FrameFlags.HasTrace,
     _ => FrameFlags.None,
   };
 

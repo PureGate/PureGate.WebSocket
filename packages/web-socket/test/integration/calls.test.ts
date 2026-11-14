@@ -54,9 +54,17 @@ describe("calls", () => {
 
     const error = await conn.api.fail.notFound(7).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(CallError);
-    expect(error).toMatchObject({ code: "not_found", message: "Item 7 does not exist.", details: { id: 7 } });
+    expect(error).toMatchObject({
+      code: "not_found",
+      message: "Item 7 does not exist.",
+      details: { id: 7 },
+      traceId: undefined,
+    });
 
-    await expect(conn.api.fail.crash()).rejects.toMatchObject({ code: "handler_failed" });
+    await expect(conn.api.fail.crash()).rejects.toMatchObject({
+      code: "handler_failed",
+      traceId: expect.stringMatching(/^[\da-f]{32}$/),
+    });
     const unknown = (conn.api as unknown as { nothing: { here(): Promise<unknown> } }).nothing.here();
     await expect(unknown).rejects.toMatchObject({ code: "unknown_operation" });
   });
