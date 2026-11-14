@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -189,6 +190,25 @@ public sealed class CallTests
   }
 
   [Test]
+  public async Task AnswersResultsThatCannotBeWrittenAsHandlerFailures()
+  {
+    var logs = new LogRecorder();
+    await using var host = await TestHost.StartAsync(
+      configure: static options => options.SerializerOptions.TypeInfoResolverChain.Insert(0, UnwritableJson.Default),
+      map: static ws => ws.MapRequest<Unwritable>("fail.unwritable", static (call, cancellationToken) => ValueTask.FromResult(new Unwritable())),
+      services: services => services.AddSingleton<ILoggerProvider>(logs));
+    await using var client = await host.ConnectAndHelloAsync();
+
+    var response = await client.CallAsync(1, "fail.unwritable");
+    Assert.That((response.Error, response.ErrorMessage), Is.EqualTo(("handler_failed", "The handler failed.")));
+    Assert.That(response.Trace, Does.Match("^00-[0-9a-f]{32}-[0-9a-f]{16}-00$"));
+    Assert.That(
+      logs.Entries.Where(entry => entry.Event == "ResultNotWritten").Select(entry => entry.Fields["TraceId"]),
+      Is.EqualTo(new[] { response.Trace[3..35] }));
+    Assert.That((await client.CallAsync(2, "echo.text", "\"still open\"")).Text, Is.EqualTo("\"still open\""));
+  }
+
+  [Test]
   public async Task CancelsHandlersAtTheirDeadline()
   {
     await using var client = await Host.ConnectAndHelloAsync();
@@ -366,3 +386,12 @@ public sealed class CallTests
     Assert.That(Encoding.ASCII.GetString("a_1"u8), Is.EqualTo(new CallException("a_1", "x").Code));
   }
 }
+
+// A result the serializer cannot write: reading its property throws.
+sealed class Unwritable
+{
+  public int Value => throw new InvalidOperationException("A secret the browser must not see.");
+}
+
+[JsonSerializable(typeof(Unwritable))]
+sealed partial class UnwritableJson : JsonSerializerContext;

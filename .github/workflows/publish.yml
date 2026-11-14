@@ -96,10 +96,10 @@ jobs:
           yarn typecheck
 
       - name: Test
-        run: yarn test
+        run: yarn test:ts
 
       - name: Build
-        run: yarn build
+        run: yarn build:ts
 
       - name: Size budget
         run: yarn workspace @puregate/web-socket size

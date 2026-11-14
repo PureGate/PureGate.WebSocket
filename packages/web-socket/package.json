@@ -1,6 +1,6 @@
 {
   "name": "@puregate/web-socket",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Dependency-free TypeScript client for PureGate.WebSocket: typed calls and events between browsers and ASP.NET Core over one WebSocket.",
   "license": "MIT",
   "author": "Ahmed Yasin Koculu",

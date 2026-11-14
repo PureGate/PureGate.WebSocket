@@ -87,14 +87,14 @@ jobs:
 
       # Unit and integration tests in Node. Fails when line coverage drops below 85% (vitest.config.ts).
       - name: Test
-        run: yarn test
+        run: yarn test:ts
 
       - name: Install browsers
         run: yarn workspace @puregate/web-socket playwright install --with-deps chromium firefox webkit
 
       # Both suites again, in Chromium, Firefox and WebKit.
       - name: Test in browsers
-        run: yarn test:browsers
+        run: yarn test:ts:browsers
 
       # The integration tests once more, against the TestServer compiled with Native AOT.
       - name: Install the Native AOT toolchain
@@ -112,7 +112,7 @@ jobs:
         run: yarn workspace @puregate/web-socket vitest run --project integration
 
       - name: Build
-        run: yarn build
+        run: yarn build:ts
 
       # The chat sample still compiles against the library and its generated contract.
       - name: Sample

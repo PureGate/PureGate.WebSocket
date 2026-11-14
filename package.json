@@ -1,18 +1,25 @@
 {
   "name": "puregate-websocket",
+  "version": "1.0.0",
   "private": true,
+  "type": "module",
   "packageManager": "yarn@4.18.1",
   "workspaces": [
     "packages/*",
     "samples/*/web"
   ],
   "scripts": {
-    "build": "yarn workspace @puregate/web-socket build",
+    "build:ts": "yarn workspace @puregate/web-socket build",
+    "build:dotnet": "dotnet build PureGate.WebSocket.slnx -c Release",
+    "test:ts": "yarn workspace @puregate/web-socket test",
+    "test:ts:browsers": "yarn workspace @puregate/web-socket test:browsers",
+    "test:dotnet": "dotnet test src/PureGate.WebSocket.Test -c Release",
+    "pack:ts": "yarn workspace @puregate/web-socket pack --out ../../artifacts/packages/web-socket-%v.tgz",
+    "pack:dotnet": "dotnet pack src/PureGate.WebSocket -c Release -o artifacts/packages",
     "typecheck": "yarn workspace @puregate/web-socket typecheck",
-    "test": "yarn workspace @puregate/web-socket test",
-    "format": "biome format --write",
     "check": "biome check",
-    "test:browsers": "yarn workspace @puregate/web-socket test:browsers"
+    "format": "biome format --write",
+    "bump-version": "node scripts/bump-version.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7"

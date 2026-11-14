@@ -1,8 +1,8 @@
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
-// yarn test runs the unit and integration projects in Node, with coverage. yarn test:browsers runs both suites again
-// in Chromium, Firefox and WebKit, where the engines differ.
+// yarn test:ts runs the unit and integration projects in Node, with coverage. yarn test:ts:browsers runs both suites
+// again in Chromium, Firefox and WebKit, where the engines differ.
 export default defineConfig({
   test: {
     coverage: {

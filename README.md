@@ -268,8 +268,8 @@ dotnet test src/PureGate.WebSocket.Test
 yarn install
 yarn check
 yarn typecheck
-yarn test             # unit and integration tests in Node, against the TestServer
-yarn test:browsers    # the same in Chromium, Firefox and WebKit
+yarn test:ts            # unit and integration tests in Node, against the TestServer
+yarn test:ts:browsers   # the same in Chromium, Firefox and WebKit
 yarn workspace @puregate/web-socket size
 ```
 
