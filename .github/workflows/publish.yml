@@ -1,45 +1,84 @@
-name: publish
+name: Publish packages
 
-# Publishes the version set in Directory.Build.props (NuGet) and packages/web-socket/package.json (npm), when you run
-# it from the Actions tab. Both registries use trusted publishing, so no API key is stored here. Before the first run:
-# - on nuget.org, add a trusted publishing policy for this repository and publish.yml, and set the repository
-#   variable NUGET_USER to the nuget.org account that owns the package;
-# - on npmjs.com, add this repository and publish.yml as the package's trusted publisher.
-# Publishing a version that is already there fails, so a forgotten version change cannot pass unnoticed.
+# Manual: Actions > Publish packages > Run workflow. Publishes PureGate.WebSocket to nuget.org and @puregate/web-socket
+# to npm at the version yarn bump-version gives both, then tags the commit and creates a GitHub release.
+# - Both registries use trusted publishing: they trust this workflow's GitHub OIDC token, so no API key is stored.
+# - npm gives only an existing package a trusted publisher. So while npm has no @puregate/web-socket, the run does not
+#   publish it but uploads it as the npm-package artifact, to publish by hand.
+# - A version already on its registry is not published again, so a run that stopped after publishing one package can
+#   be run again.
+# - Any failure stops the run: nothing is tagged or released unless every publish succeeded. A version already tagged
+#   is refused before anything is built.
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: What to publish
-        type: choice
-        options: [both, nuget, npm]
-        default: both
-
-# Bash on every runner, so a failing command fails its step there too.
-defaults:
-  run:
-    shell: bash
+      name:
+        description: 'When you press run workflow, the NuGet and npm packages will be published.'
+        default: 'I understand.'
 
 permissions:
-  contents: read
+  contents: write
+  # Trusted publishing: nuget.org and npm trust this workflow's GitHub OIDC token, so no API key is stored.
+  id-token: write
 
 jobs:
-  nuget:
-    if: inputs.target != 'npm'
+  publish:
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      # Trusted publishing exchanges the workflow's identity for a short-lived NuGet key.
-      id-token: write
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v6
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             10.0.x
             11.0.x
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          registry-url: https://registry.npmjs.org
+
+      # Node 25 and later no longer ship Corepack, which provides the Yarn version package.json pins.
+      - name: Enable Corepack
+        run: |
+          npm install --global corepack@latest
+          corepack enable
+
+      # Refuses a version the packages do not share or that is already tagged, before anything is built. Then finds
+      # where the npm package stands: new (npm has no such package), published (the version is there) or publish.
+      - name: Version
+        id: version
+        run: |
+          version=$(dotnet msbuild src/PureGate.WebSocket/PureGate.WebSocket.csproj -getProperty:Version)
+          npm_version=$(jq -r .version packages/web-socket/package.json)
+          if [ "$version" != "$npm_version" ]; then
+            echo "::error::PureGate.WebSocket is at $version and @puregate/web-socket at $npm_version. Run yarn bump-version, which sets both."
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null; then
+            echo "::error::v$version is already tagged. Run yarn bump-version."
+            exit 1
+          fi
+          echo "Publishing PureGate.WebSocket and @puregate/web-socket $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          mkdir -p artifacts
+          status=$(curl -sS --retry 3 -o artifacts/npm.json -w '%{http_code}' https://registry.npmjs.org/@puregate%2Fweb-socket)
+          if [ "$status" = 404 ]; then
+            echo "::warning::npm has no @puregate/web-socket yet. Publish the npm-package artifact by hand, then add this workflow as its trusted publisher."
+            echo "npm=new" >> "$GITHUB_OUTPUT"
+          elif [ "$status" != 200 ]; then
+            echo "::error::Could not read the published versions from npm (HTTP $status)."
+            exit 1
+          elif jq -e --arg version "$version" '.versions | has($version)' artifacts/npm.json > /dev/null; then
+            echo "::notice::@puregate/web-socket $version is already on npm, so it is not published again."
+            echo "npm=published" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm=publish" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build
         run: dotnet build PureGate.WebSocket.slnx -c Release
@@ -50,65 +89,58 @@ jobs:
       - name: Pack
         run: dotnet pack src/PureGate.WebSocket -c Release --no-build -o artifacts/packages
 
-      - name: Sign in to NuGet
-        id: nuget
-        uses: NuGet/login@v1
-        with:
-          user: ${{ vars.NUGET_USER }}
-
-      # The symbols package next to it goes up with it.
-      - name: Publish
-        run: dotnet nuget push artifacts/packages/*.nupkg --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json
-
-  npm:
-    if: inputs.target != 'nuget'
-    runs-on: ubuntu-26.04
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      # Trusted publishing, which also gives the package its provenance.
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          registry-url: https://registry.npmjs.org
-
-      # The integration tests run against the .NET TestServer.
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 11.0.x
-
-      # Node 25 and later no longer ship Corepack, which provides the Yarn version package.json pins.
-      - name: Enable Corepack
-        run: |
-          npm install --global corepack@latest
-          corepack enable
-
       - name: Install
         run: yarn install --immutable
 
-      - name: Check
+      - name: Check the client
         run: |
           yarn check
           yarn typecheck
 
-      - name: Test
+      # The integration tests run against the .NET TestServer.
+      - name: Test the client
         run: yarn test:ts
-
-      - name: Build
-        run: yarn build:ts
 
       - name: Size budget
         run: yarn workspace @puregate/web-socket size
 
-      - name: Pack
-        run: yarn workspace @puregate/web-socket pack --out "$GITHUB_WORKSPACE/artifacts/web-socket.tgz"
+      # The package's prepack builds it.
+      - name: Pack the client
+        run: yarn pack:ts
 
-      # Trusted publishing needs a recent npm CLI.
-      - name: Publish
+      # Exchanges the OIDC token for a temporary API key (valid for an hour), per the trusted publishing policy on
+      # nuget.org. user is the nuget.org profile name of the policy's creator.
+      - name: NuGet login
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: koculu
+
+      # The Version step refused released versions, so a version already on nuget.org is one an earlier run pushed
+      # before it stopped; --skip-duplicate keeps it. The symbols package (.snupkg) goes up with it.
+      - name: Publish the package to nuget.org
+        run: dotnet nuget push "artifacts/packages/PureGate.WebSocket.${{ steps.version.outputs.version }}.nupkg" -k "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" -s https://api.nuget.org/v3/index.json --skip-duplicate
+
+      # Trusted publishing needs npm 11.5.1 or later. It also gives the package its provenance.
+      - name: Publish the client to npm
+        if: steps.version.outputs.npm == 'publish'
         run: |
           npm install --global npm@latest
-          npm publish "$GITHUB_WORKSPACE/artifacts/web-socket.tgz" --access public
+          npm publish "artifacts/packages/web-socket-${{ steps.version.outputs.version }}.tgz" --access public
+
+      - name: Upload the client to publish by hand
+        if: steps.version.outputs.npm == 'new'
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-package
+          path: artifacts/packages/web-socket-${{ steps.version.outputs.version }}.tgz
+          if-no-files-found: error
+
+      - name: Tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "v${{ steps.version.outputs.version }}" artifacts/packages/*
+          --target "$GITHUB_SHA"
+          --title "PureGate.WebSocket ${{ steps.version.outputs.version }}"
+          --generate-notes
